@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ParsedFile, ColumnMapping, StandardField, SubjectCount } from './utils/excelUtils';
 import { mergeFiles, tallySubjects, autoDetectMapping, exportToExcel, exportToTabText } from './utils/excelUtils';
 import * as XLSX from 'xlsx';
@@ -7,6 +7,18 @@ import { FileUploader } from './components/FileUploader';
 import { ColumnMapper } from './components/ColumnMapper';
 import { MergedDataView } from './components/MergedDataView';
 import { SubjectTally } from './components/SubjectTally';
+
+const LOCAL_STORAGE_KEY = 'fagvalg-opptelling-state-v1';
+
+interface PersistedAppState {
+  parsedFiles: ParsedFile[];
+  mappings: Record<string, ColumnMapping>;
+  mergedData: StandardField[];
+  subjects: SubjectCount[];
+  subjectMaxByName: Record<string, number>;
+  blokkCount: number;
+  selectedMergedSubject: string;
+}
 
 function App() {
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
@@ -23,6 +35,77 @@ function App() {
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningCopyStatus, setWarningCopyStatus] = useState('');
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
+  const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedState = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!savedState) {
+        return;
+      }
+
+      const parsedState = JSON.parse(savedState) as Partial<PersistedAppState>;
+
+      if (Array.isArray(parsedState.parsedFiles)) {
+        setParsedFiles(parsedState.parsedFiles);
+      }
+
+      if (parsedState.mappings && typeof parsedState.mappings === 'object') {
+        setMappings(new Map(Object.entries(parsedState.mappings)));
+      }
+
+      if (Array.isArray(parsedState.mergedData)) {
+        setMergedData(parsedState.mergedData);
+      }
+
+      if (Array.isArray(parsedState.subjects)) {
+        setSubjects(parsedState.subjects);
+      }
+
+      if (parsedState.subjectMaxByName && typeof parsedState.subjectMaxByName === 'object') {
+        setSubjectMaxByName(parsedState.subjectMaxByName);
+      }
+
+      if (typeof parsedState.blokkCount === 'number') {
+        setBlokkCount(parsedState.blokkCount);
+      }
+
+      if (typeof parsedState.selectedMergedSubject === 'string') {
+        setSelectedMergedSubject(parsedState.selectedMergedSubject);
+      }
+    } catch {
+      // Ignore malformed localStorage data and continue with fresh state.
+    } finally {
+      setIsHydratedFromStorage(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isHydratedFromStorage) {
+      return;
+    }
+
+    const persistedState: PersistedAppState = {
+      parsedFiles,
+      mappings: Object.fromEntries(mappings.entries()),
+      mergedData,
+      subjects,
+      subjectMaxByName,
+      blokkCount,
+      selectedMergedSubject,
+    };
+
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(persistedState));
+  }, [
+    isHydratedFromStorage,
+    parsedFiles,
+    mappings,
+    mergedData,
+    subjects,
+    subjectMaxByName,
+    blokkCount,
+    selectedMergedSubject,
+  ]);
 
   const handleFilesAdded = (files: ParsedFile[]) => {
     setParsedFiles((prev) => [...prev, ...files]);
@@ -68,6 +151,12 @@ function App() {
     setSubjects([]);
     setSubjectMaxByName({});
     setSelectedMergedSubject('');
+  };
+
+  const handleClearStoredData = () => {
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    handleReset();
+    setBlokkCount(4);
   };
 
   const handleRemoveFile = (fileId: string) => {
@@ -270,6 +359,9 @@ function App() {
               </button>
               <button onClick={handleReset} className="reset-btn">
                 Tilbakestill alt
+              </button>
+              <button onClick={handleClearStoredData} className="clear-storage-btn">
+                Tøm lagret data
               </button>
               <button
                 onClick={handleExport}

@@ -106,6 +106,7 @@
 
 .merge-btn,
 .reset-btn,
+.clear-storage-btn,
 .export-btn {
   padding: 7px 12px;
   border-radius: 4px;
@@ -118,6 +119,7 @@
 
 .merge-btn:disabled,
 .reset-btn:disabled,
+.clear-storage-btn:disabled,
 .export-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -148,6 +150,15 @@
 
 .export-btn:hover {
   background: #666;
+}
+
+.clear-storage-btn {
+  background: #8c6f3a;
+  color: white;
+}
+
+.clear-storage-btn:hover {
+  background: #735a2f;
 }
 
 .collapsible-header {
