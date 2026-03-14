@@ -101,8 +101,7 @@ const extractAssignments = (student: StandardField, blokkCount: number): Assignm
 
 const hasMissingSubjects = (student: StandardField, blokkCount: number): boolean => {
   const assignments = extractAssignments(student, blokkCount).filter((entry) => entry.blokkNumber <= 4);
-  const uniqueBlokker = new Set(assignments.map((entry) => entry.blokkNumber));
-  return uniqueBlokker.size < 3;
+  return assignments.length < 3;
 };
 
 const hasTooManySubjects = (student: StandardField, blokkCount: number): boolean => {

@@ -327,18 +327,41 @@ function App() {
     return !!warningIgnoresByStudentAndType[studentId]?.[type];
   };
 
+  const parseWarningSubjects = (value: string | null): string[] => {
+    if (!value) {
+      return [];
+    }
+
+    return value
+      .split(/[,;]/)
+      .map((subject) => subject.trim())
+      .filter((subject) => subject.length > 0);
+  };
+
+  const getWarningSubjects = (student: StandardField): string[] => {
+    return [student.blokk1, student.blokk2, student.blokk3, student.blokk4]
+      .flatMap((blokk) => parseWarningSubjects(blokk));
+  };
+
+  const getWarningSubjectsInBlokk = (student: StandardField, blokkNumber: number): string[] => {
+    const blokkKey = `blokk${blokkNumber}` as keyof StandardField;
+    const value = student[blokkKey];
+    return parseWarningSubjects(typeof value === 'string' ? value : null);
+  };
+
   const warningEntries = mergedData.map((student, index) => {
-    const subjectCount = [
-      student.blokk1,
-      student.blokk2,
-      student.blokk3,
-      student.blokk4,
-    ].filter((blokk) => blokk && blokk.trim() !== '').length;
+    const subjectCount = getWarningSubjects(student).length;
+    const collisionBlokker = [1, 2, 3, 4].filter((blokkNumber) => getWarningSubjectsInBlokk(student, blokkNumber).length > 1);
 
     return {
       student,
       studentId: getWarningStudentId(student, index),
       subjectCount,
+      hasBlokkCollision: collisionBlokker.length > 0,
+      collisionDetails: collisionBlokker.map((blokkNumber) => {
+        const subjects = getWarningSubjectsInBlokk(student, blokkNumber);
+        return `Blokk ${blokkNumber}: ${subjects.join(', ')}`;
+      }),
     };
   });
 
@@ -378,10 +401,21 @@ function App() {
     (entry) => isWarningIgnored(entry.studentId, 'overloaded')
   );
 
+  const getStudentsWithBlokkCollisions = () => {
+    return warningEntries
+      .filter((entry) => entry.hasBlokkCollision)
+      .sort((a, b) => (a.student.navn || '').localeCompare(b.student.navn || '', 'nb', { sensitivity: 'base' }));
+  };
+
+  const studentsWithBlokkCollisions = getStudentsWithBlokkCollisions();
+  const activeStudentsWithBlokkCollisions = studentsWithBlokkCollisions;
+
   const fewSubjectsIgnoredCount = ignoredStudentsWithFewSubjects.length;
 
   const fourSubjectsIgnoredCount = ignoredStudentsWithFourSubjects.length;
-  const hasActiveWarnings = activeStudentsWithFewSubjects.length > 0 || activeStudentsWithFourSubjects.length > 0;
+  const hasActiveWarnings = activeStudentsWithFewSubjects.length > 0
+    || activeStudentsWithFourSubjects.length > 0
+    || activeStudentsWithBlokkCollisions.length > 0;
 
   const warningStudentIds = new Set<string>([
     ...studentsWithFewSubjects.map((entry) => entry.studentId),
@@ -475,8 +509,7 @@ function App() {
     const XLSX = await loadXlsx();
     const warningRows = [
       ...activeStudentsWithFewSubjects.map((entry) => {
-        const subjects = [entry.student.blokk1, entry.student.blokk2, entry.student.blokk3, entry.student.blokk4]
-          .filter((blokk) => blokk && blokk.trim() !== '');
+        const subjects = getWarningSubjects(entry.student);
         return {
           Kategori: 'Under 3 fag',
           Navn: entry.student.navn || 'Ukjent',
@@ -488,8 +521,7 @@ function App() {
         };
       }),
       ...activeStudentsWithFourSubjects.map((entry) => {
-        const subjects = [entry.student.blokk1, entry.student.blokk2, entry.student.blokk3, entry.student.blokk4]
-          .filter((blokk) => blokk && blokk.trim() !== '');
+        const subjects = getWarningSubjects(entry.student);
         return {
           Kategori: '4 fag',
           Navn: entry.student.navn || 'Ukjent',
@@ -498,6 +530,18 @@ function App() {
           Fag: subjects.join(', '),
           Ignorert: 'Nei',
           Kommentar: '',
+        };
+      }),
+      ...activeStudentsWithBlokkCollisions.map((entry) => {
+        const subjects = getWarningSubjects(entry.student);
+        return {
+          Kategori: 'Blokk-kollisjon',
+          Navn: entry.student.navn || 'Ukjent',
+          Klasse: entry.student.klasse || 'Ingen klasse',
+          AntallFag: subjects.length,
+          Fag: subjects.join(', '),
+          Ignorert: 'Nei',
+          Kommentar: entry.collisionDetails.join(' | '),
         };
       })
     ];
@@ -510,15 +554,17 @@ function App() {
 
   const handleWarningCopy = async () => {
     const fewSubjectsText = activeStudentsWithFewSubjects.map((entry) => {
-      const subjects = [entry.student.blokk1, entry.student.blokk2, entry.student.blokk3, entry.student.blokk4]
-        .filter((blokk) => blokk && blokk.trim() !== '');
+      const subjects = getWarningSubjects(entry.student);
       return `${entry.student.navn || 'Ukjent'} (${entry.student.klasse || 'Ingen klasse'}) - ${subjects.length} fag: ${subjects.join(', ') || 'Ingen'}`;
     });
 
     const fourSubjectsText = activeStudentsWithFourSubjects.map((entry) => {
-      const subjects = [entry.student.blokk1, entry.student.blokk2, entry.student.blokk3, entry.student.blokk4]
-        .filter((blokk) => blokk && blokk.trim() !== '');
+      const subjects = getWarningSubjects(entry.student);
       return `${entry.student.navn || 'Ukjent'} (${entry.student.klasse || 'Ingen klasse'}) - 4 fag: ${subjects.join(', ')}`;
+    });
+
+    const blokkCollisionText = activeStudentsWithBlokkCollisions.map((entry) => {
+      return `${entry.student.navn || 'Ukjent'} (${entry.student.klasse || 'Ingen klasse'}) - ${entry.collisionDetails.join(' | ')}`;
     });
 
     const clipboardText = [
@@ -528,7 +574,10 @@ function App() {
       ...fewSubjectsText,
       ``,
       `4+ fag (${activeStudentsWithFourSubjects.length})`,
-      ...fourSubjectsText
+      ...fourSubjectsText,
+      ``,
+      `Blokk-kollisjon (${activeStudentsWithBlokkCollisions.length})`,
+      ...blokkCollisionText
     ].join('\n');
 
     try {
@@ -636,12 +685,12 @@ function App() {
                 >
                   <span className="chevron">{warningExpanded ? '▼' : '▶'}</span>
                   {hasActiveWarnings
-                    ? `⚠️ Advarsel: ${activeStudentsWithFewSubjects.length} under 3 fag, ${activeStudentsWithFourSubjects.length} med 4+ fag`
+                    ? `⚠️ Advarsel: ${activeStudentsWithBlokkCollisions.length} blokk-kollisjon, ${activeStudentsWithFewSubjects.length} under 3 fag, ${activeStudentsWithFourSubjects.length} med 4+ fag`
                     : '✅ Ingen aktive advarsler'}
                 </h3>
                 {warningExpanded && (
                   <div className="warning-content">
-                    {!hasActiveWarnings && studentsWithFewSubjects.length === 0 && studentsWithFourSubjects.length === 0 && (
+                    {!hasActiveWarnings && studentsWithFewSubjects.length === 0 && studentsWithFourSubjects.length === 0 && studentsWithBlokkCollisions.length === 0 && (
                       <p className="warning-clear-message">Alle elever har gyldig antall blokkfag.</p>
                     )}
                     <div className="warning-actions">
@@ -654,29 +703,36 @@ function App() {
                       {warningCopyStatus && <span className="warning-copy-status">{warningCopyStatus}</span>}
                     </div>
 
+                    <h4 className="warning-subtitle">Elever med blokk-kollisjon ({activeStudentsWithBlokkCollisions.length})</h4>
+                    <ul>
+                      {studentsWithBlokkCollisions.map((entry, idx) => {
+                        const student = entry.student;
+                        return (
+                          <li key={`collision-${entry.studentId}-${idx}`}>
+                            <div className="warning-line">
+                              <span>
+                                <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {entry.collisionDetails.join(' | ')}
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    <hr className="warning-divider" />
+
                     <h4 className="warning-subtitle">Elever med færre enn 3 blokkfag ({activeStudentsWithFewSubjects.length}, ignorert: {fewSubjectsIgnoredCount})</h4>
                     <ul>
                       {studentsWithFewSubjects.map((entry, idx) => {
                         const student = entry.student;
                         const studentId = entry.studentId;
                         const ignored = warningIgnoresByStudentAndType[studentId]?.missing;
-                        const blokkCount = [
-                          student.blokk1,
-                          student.blokk2,
-                          student.blokk3,
-                          student.blokk4
-                        ].filter((blokk) => blokk && blokk.trim() !== '').length;
-                        const subjects = [
-                          student.blokk1,
-                          student.blokk2,
-                          student.blokk3,
-                          student.blokk4
-                        ].filter((blokk) => blokk && blokk.trim() !== '');
+                        const subjects = getWarningSubjects(student);
                         return (
                           <li key={`few-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
                             <div className="warning-line">
                               <span>
-                                <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {blokkCount} fag: {subjects.join(', ') || 'Ingen'}
+                                <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {subjects.length} fag: {subjects.join(', ') || 'Ingen'}
                               </span>
                               {ignored && <span className="warning-ignore-badge">Ignorert</span>}
                             </div>
@@ -729,12 +785,7 @@ function App() {
                         const student = entry.student;
                         const studentId = entry.studentId;
                         const ignored = warningIgnoresByStudentAndType[studentId]?.overloaded;
-                        const subjects = [
-                          student.blokk1,
-                          student.blokk2,
-                          student.blokk3,
-                          student.blokk4
-                        ].filter((blokk) => blokk && blokk.trim() !== '');
+                        const subjects = getWarningSubjects(student);
                         return (
                           <li key={`four-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
                             <div className="warning-line">
