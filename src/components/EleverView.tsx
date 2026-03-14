@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils';
 import type { SubjectSettingsByName } from './SubjectTally';
 import styles from './EleverView.module.css';
@@ -22,6 +22,7 @@ interface EleverViewProps {
   onRemoveWarningIgnore: (studentId: string, type: WarningType) => void;
   changeLog: StudentAssignmentChange[];
   onStudentDataUpdate: (updatedData: StandardField[], changes: StudentAssignmentChange[]) => void;
+  externallySelectedStudentId?: string;
 }
 
 interface AssignmentEntry {
@@ -178,7 +179,9 @@ export const EleverView = ({
   onRemoveWarningIgnore,
   changeLog,
   onStudentDataUpdate,
+  externallySelectedStudentId,
 }: EleverViewProps) => {
+  const studentRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [studentQuery, setStudentQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StudentFilter>('all');
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -257,6 +260,31 @@ export const EleverView = ({
     setEditAssignment(null);
     setWarningIgnoreDraftByType({});
   }, [selectedStudentId]);
+
+  useEffect(() => {
+    if (!externallySelectedStudentId) {
+      return;
+    }
+
+    setActiveFilter('all');
+    setStudentQuery('');
+    setSelectedStudentId(externallySelectedStudentId);
+
+    const scrollToSelectedRow = () => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const row = studentRowRefs.current[externallySelectedStudentId];
+          row?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest',
+          });
+        });
+      });
+    };
+
+    scrollToSelectedRow();
+  }, [externallySelectedStudentId]);
 
   const getSubjectGroupMetrics = (subject: string): SubjectGroupMetrics => {
     const result: SubjectGroupMetrics = {
@@ -920,6 +948,9 @@ export const EleverView = ({
               <button
                 key={entry.studentId}
                 type="button"
+                ref={(element) => {
+                  studentRowRefs.current[entry.studentId] = element;
+                }}
                 className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''}`.trim()}
                 onClick={() => setSelectedStudentId(entry.studentId)}
               >

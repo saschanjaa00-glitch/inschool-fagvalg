@@ -62,6 +62,7 @@ function App() {
     Record<string, Partial<Record<WarningType, WarningIgnoreEntry>>>
   >({});
   const [warningIgnoreDraftByStudentId, setWarningIgnoreDraftByStudentId] = useState<Record<string, string>>({});
+  const [selectedEleverStudentId, setSelectedEleverStudentId] = useState('');
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
 
@@ -224,6 +225,7 @@ function App() {
     setSubjectSettingsByName({});
     setWarningIgnoresByStudentAndType({});
     setWarningIgnoreDraftByStudentId({});
+    setSelectedEleverStudentId('');
     setSelectedMergedSubject('');
   };
 
@@ -595,6 +597,11 @@ function App() {
     }, 2000);
   };
 
+  const handleOpenStudentInElever = (studentId: string) => {
+    setSelectedEleverStudentId(studentId);
+    setActiveDataTab('elever');
+  };
+
   return (
     <div className="app">
       <main className="main">
@@ -722,7 +729,14 @@ function App() {
                             <li key={`collision-${entry.studentId}-${idx}`}>
                               <div className="warning-line">
                                 <span>
-                                  <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {entry.collisionDetails.join(' | ')}
+                                    <button
+                                      type="button"
+                                      className="warning-student-link"
+                                      onClick={() => handleOpenStudentInElever(entry.studentId)}
+                                    >
+                                      <strong>{student.navn || 'Ukjent'}</strong>
+                                    </button>{' '}
+                                    ({student.klasse || 'Ingen klasse'}) - {entry.collisionDetails.join(' | ')}
                                 </span>
                               </div>
                             </li>
@@ -752,7 +766,14 @@ function App() {
                             <li key={`few-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
                               <div className="warning-line">
                                 <span>
-                                  <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {subjects.length} fag: {subjects.join(', ') || 'Ingen'}
+                                    <button
+                                      type="button"
+                                      className="warning-student-link"
+                                      onClick={() => handleOpenStudentInElever(studentId)}
+                                    >
+                                      <strong>{student.navn || 'Ukjent'}</strong>
+                                    </button>{' '}
+                                    ({student.klasse || 'Ingen klasse'}) - {subjects.length} fag: {subjects.join(', ') || 'Ingen'}
                                 </span>
                                 {ignored && <span className="warning-ignore-badge">Ignorert</span>}
                               </div>
@@ -819,7 +840,14 @@ function App() {
                             <li key={`four-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
                               <div className="warning-line">
                                 <span>
-                                  <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - 4 fag: {subjects.join(', ')}
+                                    <button
+                                      type="button"
+                                      className="warning-student-link"
+                                      onClick={() => handleOpenStudentInElever(studentId)}
+                                    >
+                                      <strong>{student.navn || 'Ukjent'}</strong>
+                                    </button>{' '}
+                                    ({student.klasse || 'Ingen klasse'}) - 4 fag: {subjects.join(', ')}
                                 </span>
                                 {ignored && <span className="warning-ignore-badge">Ignorert</span>}
                               </div>
@@ -928,6 +956,7 @@ function App() {
                   onRemoveWarningIgnore={removeWarningIgnore}
                   changeLog={studentAssignmentChanges}
                   onStudentDataUpdate={handleStudentAssignmentsUpdated}
+                  externallySelectedStudentId={selectedEleverStudentId}
                 />
               )}
             </div>
