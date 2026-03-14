@@ -229,7 +229,8 @@ const getSettingsForSubject = (
     ? { ...raw.groupStudentAssignments }
     : {};
 
-  if (explicitGroups.length > 0) {
+  // If groups were explicitly saved (including an empty array), respect that state.
+  if (Array.isArray(raw.groups)) {
     return {
       defaultMax,
       groupStudentAssignments,
