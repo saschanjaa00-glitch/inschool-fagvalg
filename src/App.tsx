@@ -896,34 +896,37 @@ function App() {
                 )}
               </div>
             
-            <div className="data-tabs" role="tablist" aria-label="Data visning">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeDataTab === 'subjects'}
-                className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
-                onClick={() => setActiveDataTab('subjects')}
-              >
-                Fagoversikt ({subjects.length} fag)
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeDataTab === 'elever'}
-                className={`data-tab ${activeDataTab === 'elever' ? 'data-tab-active' : ''}`.trim()}
-                onClick={() => setActiveDataTab('elever')}
-              >
-                Elever ({mergedData.length})
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeDataTab === 'students'}
-                className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
-                onClick={() => setActiveDataTab('students')}
-              >
-                Elevtabell ({mergedData.length} elever)
-              </button>
+            <div className="control-row-group">
+              <div className="control-row-label">Visning</div>
+              <div className="data-tabs" role="tablist" aria-label="Data visning">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataTab === 'subjects'}
+                  className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('subjects')}
+                >
+                  Fagoversikt ({subjects.length} fag)
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataTab === 'elever'}
+                  className={`data-tab ${activeDataTab === 'elever' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('elever')}
+                >
+                  Elever ({mergedData.length})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataTab === 'students'}
+                  className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('students')}
+                >
+                  Elevtabell ({mergedData.length} elever)
+                </button>
+              </div>
             </div>
 
             <div className="data-tab-panel">

@@ -891,46 +891,49 @@ export const EleverView = ({
 
   return (
     <div className={styles.wrapper}>
-      <div className={styles.filters}>
-        <button
-          type="button"
-          className={`${styles.filterButton} ${activeFilter === 'all' ? styles.filterButtonActive : ''}`.trim()}
-          onClick={() => setActiveFilter('all')}
-        >
-          Alle ({data.length})
-        </button>
-        <button
-          type="button"
-          className={`${styles.filterButton} ${activeFilter === 'missing' ? styles.filterButtonActive : ''}`.trim()}
-          onClick={() => setActiveFilter('missing')}
-          disabled={counts.missing === 0}
-        >
-          Mangler fag ({counts.missing})
-        </button>
-        <button
-          type="button"
-          className={`${styles.filterButton} ${activeFilter === 'overloaded' ? styles.filterButtonActive : ''}`.trim()}
-          onClick={() => setActiveFilter('overloaded')}
-          disabled={counts.overloaded === 0}
-        >
-          For mange fag ({counts.overloaded})
-        </button>
-        <button
-          type="button"
-          className={`${styles.filterButton} ${activeFilter === 'collisions' ? styles.filterButtonActive : ''}`.trim()}
-          onClick={() => setActiveFilter('collisions')}
-          disabled={counts.collisions === 0}
-        >
-          Blokk-kollisjoner ({counts.collisions})
-        </button>
-        <button
-          type="button"
-          className={`${styles.filterButton} ${activeFilter === 'duplicates' ? styles.filterButtonActive : ''}`.trim()}
-          onClick={() => setActiveFilter('duplicates')}
-          disabled={counts.duplicates === 0}
-        >
-          Duplikater ({counts.duplicates})
-        </button>
+      <div className={styles.filterGroup}>
+        <div className={styles.filterLabel}>Elevfilter</div>
+        <div className={styles.filters}>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'all' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('all')}
+          >
+            Alle ({data.length})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'missing' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('missing')}
+            disabled={counts.missing === 0}
+          >
+            Mangler fag ({counts.missing})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'overloaded' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('overloaded')}
+            disabled={counts.overloaded === 0}
+          >
+            For mange fag ({counts.overloaded})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'collisions' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('collisions')}
+            disabled={counts.collisions === 0}
+          >
+            Blokk-kollisjoner ({counts.collisions})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'duplicates' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('duplicates')}
+            disabled={counts.duplicates === 0}
+          >
+            Duplikater ({counts.duplicates})
+          </button>
+        </div>
       </div>
 
       <div className={styles.viewerGrid}>
@@ -1094,21 +1097,23 @@ export const EleverView = ({
                           <td>{assignment.subject}</td>
                           <td>Blokk {assignment.blokkNumber}</td>
                           <td className={styles.actionsCell}>
-                            <button
-                              type="button"
-                              className={styles.moveButton}
-                              onClick={() => openEditAssignment(assignment, rowKey)}
-                              title={`Endre ${assignment.subject}`}
-                            >
-                              Endre
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.removeButton}
-                              onClick={() => handleRemoveAssignment(assignment.subject, assignment.blokkNumber)}
-                            >
-                              Fjern
-                            </button>
+                            <div className={styles.actionsButtons}>
+                              <button
+                                type="button"
+                                className={styles.moveButton}
+                                onClick={() => openEditAssignment(assignment, rowKey)}
+                                title={`Endre ${assignment.subject}`}
+                              >
+                                Endre
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.removeButton}
+                                onClick={() => handleRemoveAssignment(assignment.subject, assignment.blokkNumber)}
+                              >
+                                Fjern
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )})
