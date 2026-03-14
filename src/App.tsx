@@ -28,6 +28,7 @@ interface PersistedAppState {
   subjects: SubjectCount[];
   studentAssignmentChanges?: StudentAssignmentChange[];
   subjectSettingsByName: SubjectSettingsByName;
+  warningIgnoresByStudentId?: Record<string, { comment: string; ignoredAt: string }>;
   subjectMaxByName?: Record<string, number>;
   blokkCount: number;
   selectedMergedSubject: string;
@@ -46,6 +47,8 @@ function App() {
   const [activeDataTab, setActiveDataTab] = useState<'subjects' | 'students' | 'elever'>('subjects');
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningCopyStatus, setWarningCopyStatus] = useState('');
+  const [warningIgnoresByStudentId, setWarningIgnoresByStudentId] = useState<Record<string, { comment: string; ignoredAt: string }>>({});
+  const [warningIgnoreDraftByStudentId, setWarningIgnoreDraftByStudentId] = useState<Record<string, string>>({});
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
 
@@ -101,6 +104,10 @@ function App() {
         setSubjectSettingsByName(migrated);
       }
 
+      if (parsedState.warningIgnoresByStudentId && typeof parsedState.warningIgnoresByStudentId === 'object') {
+        setWarningIgnoresByStudentId(parsedState.warningIgnoresByStudentId);
+      }
+
       if (typeof parsedState.blokkCount === 'number') {
         setBlokkCount(parsedState.blokkCount);
       }
@@ -127,6 +134,7 @@ function App() {
       subjects,
       studentAssignmentChanges,
       subjectSettingsByName,
+      warningIgnoresByStudentId,
       blokkCount,
       selectedMergedSubject,
     };
@@ -140,6 +148,7 @@ function App() {
     subjects,
     studentAssignmentChanges,
     subjectSettingsByName,
+    warningIgnoresByStudentId,
     blokkCount,
     selectedMergedSubject,
   ]);
@@ -189,6 +198,8 @@ function App() {
     setSubjects([]);
     setStudentAssignmentChanges([]);
     setSubjectSettingsByName({});
+    setWarningIgnoresByStudentId({});
+    setWarningIgnoreDraftByStudentId({});
     setSelectedMergedSubject('');
   };
 
@@ -274,6 +285,14 @@ function App() {
     setStudentAssignmentChanges((prev) => [...prev, ...changes]);
   };
 
+  const getWarningStudentId = (student: StandardField): string => {
+    if (student.studentId && student.studentId.trim().length > 0) {
+      return student.studentId;
+    }
+
+    return `${student.navn || 'ukjent'}|${student.klasse || 'ukjent'}`;
+  };
+
   // Get students with less than 3 blokkfag
   const getStudentsWithFewSubjects = () => {
     return mergedData
@@ -306,6 +325,61 @@ function App() {
 
   const studentsWithFourSubjects = getStudentsWithFourSubjects();
 
+  const fewSubjectsIgnoredCount = studentsWithFewSubjects.filter(
+    (student) => !!warningIgnoresByStudentId[getWarningStudentId(student)]
+  ).length;
+
+  const fourSubjectsIgnoredCount = studentsWithFourSubjects.filter(
+    (student) => !!warningIgnoresByStudentId[getWarningStudentId(student)]
+  ).length;
+
+  const warningStudentIds = new Set<string>([
+    ...studentsWithFewSubjects.map((student) => getWarningStudentId(student)),
+    ...studentsWithFourSubjects.map((student) => getWarningStudentId(student)),
+  ]);
+
+  useEffect(() => {
+    setWarningIgnoresByStudentId((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([studentId]) => warningStudentIds.has(studentId))
+      ) as Record<string, { comment: string; ignoredAt: string }>;
+
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+
+    setWarningIgnoreDraftByStudentId((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([studentId]) => warningStudentIds.has(studentId))
+      ) as Record<string, string>;
+
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [studentsWithFewSubjects, studentsWithFourSubjects]);
+
+  const saveWarningIgnore = (studentId: string) => {
+    const rawComment = warningIgnoreDraftByStudentId[studentId] || '';
+    const comment = rawComment.trim();
+    if (!comment) {
+      return;
+    }
+
+    setWarningIgnoresByStudentId((prev) => ({
+      ...prev,
+      [studentId]: {
+        comment,
+        ignoredAt: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const removeWarningIgnore = (studentId: string) => {
+    setWarningIgnoresByStudentId((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
+  };
+
   const matchesSelectedSubject = (value: string | null, selectedSubject: string) => {
     if (!value || !selectedSubject) {
       return false;
@@ -333,6 +407,8 @@ function App() {
     const XLSX = await loadXlsx();
     const warningRows = [
       ...studentsWithFewSubjects.map((student) => {
+        const studentId = getWarningStudentId(student);
+        const ignored = warningIgnoresByStudentId[studentId];
         const subjects = [student.blokk1, student.blokk2, student.blokk3, student.blokk4]
           .filter((blokk) => blokk && blokk.trim() !== '');
         return {
@@ -340,10 +416,14 @@ function App() {
           Navn: student.navn || 'Ukjent',
           Klasse: student.klasse || 'Ingen klasse',
           AntallFag: subjects.length,
-          Fag: subjects.join(', ')
+          Fag: subjects.join(', '),
+          Ignorert: ignored ? 'Ja' : 'Nei',
+          Kommentar: ignored?.comment || '',
         };
       }),
       ...studentsWithFourSubjects.map((student) => {
+        const studentId = getWarningStudentId(student);
+        const ignored = warningIgnoresByStudentId[studentId];
         const subjects = [student.blokk1, student.blokk2, student.blokk3, student.blokk4]
           .filter((blokk) => blokk && blokk.trim() !== '');
         return {
@@ -351,7 +431,9 @@ function App() {
           Navn: student.navn || 'Ukjent',
           Klasse: student.klasse || 'Ingen klasse',
           AntallFag: subjects.length,
-          Fag: subjects.join(', ')
+          Fag: subjects.join(', '),
+          Ignorert: ignored ? 'Ja' : 'Nei',
+          Kommentar: ignored?.comment || '',
         };
       })
     ];
@@ -364,15 +446,21 @@ function App() {
 
   const handleWarningCopy = async () => {
     const fewSubjectsText = studentsWithFewSubjects.map((student) => {
+      const studentId = getWarningStudentId(student);
+      const ignored = warningIgnoresByStudentId[studentId];
       const subjects = [student.blokk1, student.blokk2, student.blokk3, student.blokk4]
         .filter((blokk) => blokk && blokk.trim() !== '');
-      return `${student.navn || 'Ukjent'} (${student.klasse || 'Ingen klasse'}) - ${subjects.length} fag: ${subjects.join(', ') || 'Ingen'}`;
+      const ignoreText = ignored ? ` [IGNORERT: ${ignored.comment}]` : '';
+      return `${student.navn || 'Ukjent'} (${student.klasse || 'Ingen klasse'}) - ${subjects.length} fag: ${subjects.join(', ') || 'Ingen'}${ignoreText}`;
     });
 
     const fourSubjectsText = studentsWithFourSubjects.map((student) => {
+      const studentId = getWarningStudentId(student);
+      const ignored = warningIgnoresByStudentId[studentId];
       const subjects = [student.blokk1, student.blokk2, student.blokk3, student.blokk4]
         .filter((blokk) => blokk && blokk.trim() !== '');
-      return `${student.navn || 'Ukjent'} (${student.klasse || 'Ingen klasse'}) - 4 fag: ${subjects.join(', ')}`;
+      const ignoreText = ignored ? ` [IGNORERT: ${ignored.comment}]` : '';
+      return `${student.navn || 'Ukjent'} (${student.klasse || 'Ingen klasse'}) - 4 fag: ${subjects.join(', ')}${ignoreText}`;
     });
 
     const clipboardText = [
@@ -504,9 +592,11 @@ function App() {
                       {warningCopyStatus && <span className="warning-copy-status">{warningCopyStatus}</span>}
                     </div>
 
-                    <h4 className="warning-subtitle">Elever med færre enn 3 blokkfag ({studentsWithFewSubjects.length})</h4>
+                    <h4 className="warning-subtitle">Elever med færre enn 3 blokkfag ({studentsWithFewSubjects.length}, ignorert: {fewSubjectsIgnoredCount})</h4>
                     <ul>
                       {studentsWithFewSubjects.map((student, idx) => {
+                        const studentId = getWarningStudentId(student);
+                        const ignored = warningIgnoresByStudentId[studentId];
                         const blokkCount = [
                           student.blokk1,
                           student.blokk2,
@@ -520,8 +610,50 @@ function App() {
                           student.blokk4
                         ].filter((blokk) => blokk && blokk.trim() !== '');
                         return (
-                          <li key={`few-${idx}`}>
-                            <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {blokkCount} fag: {subjects.join(', ') || 'Ingen'}
+                          <li key={`few-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
+                            <div className="warning-line">
+                              <span>
+                                <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - {blokkCount} fag: {subjects.join(', ') || 'Ingen'}
+                              </span>
+                              {ignored && <span className="warning-ignore-badge">Ignorert</span>}
+                            </div>
+                            {ignored ? (
+                              <div className="warning-ignore-row">
+                                <span className="warning-ignore-comment">Kommentar: {ignored.comment}</span>
+                                <button
+                                  type="button"
+                                  className="warning-inline-btn"
+                                  onClick={() => removeWarningIgnore(studentId)}
+                                >
+                                  Fjern ignorering
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="warning-ignore-row">
+                                <input
+                                  type="text"
+                                  maxLength={140}
+                                  className="warning-ignore-input"
+                                  placeholder="Kort kommentar for ignorering"
+                                  value={warningIgnoreDraftByStudentId[studentId] || ''}
+                                  onChange={(event) => {
+                                    const value = event.target.value;
+                                    setWarningIgnoreDraftByStudentId((prev) => ({
+                                      ...prev,
+                                      [studentId]: value,
+                                    }));
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="warning-inline-btn"
+                                  onClick={() => saveWarningIgnore(studentId)}
+                                  disabled={!(warningIgnoreDraftByStudentId[studentId] || '').trim()}
+                                >
+                                  Ignorer
+                                </button>
+                              </div>
+                            )}
                           </li>
                         );
                       })}
@@ -529,9 +661,11 @@ function App() {
 
                     <hr className="warning-divider" />
 
-                    <h4 className="warning-subtitle">Elever med 4+ blokkfag ({studentsWithFourSubjects.length})</h4>
+                    <h4 className="warning-subtitle">Elever med 4+ blokkfag ({studentsWithFourSubjects.length}, ignorert: {fourSubjectsIgnoredCount})</h4>
                     <ul>
                       {studentsWithFourSubjects.map((student, idx) => {
+                        const studentId = getWarningStudentId(student);
+                        const ignored = warningIgnoresByStudentId[studentId];
                         const subjects = [
                           student.blokk1,
                           student.blokk2,
@@ -539,8 +673,50 @@ function App() {
                           student.blokk4
                         ].filter((blokk) => blokk && blokk.trim() !== '');
                         return (
-                          <li key={`four-${idx}`}>
-                            <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - 4 fag: {subjects.join(', ')}
+                          <li key={`four-${studentId}-${idx}`} className={ignored ? 'warning-ignored-item' : ''}>
+                            <div className="warning-line">
+                              <span>
+                                <strong>{student.navn || 'Ukjent'}</strong> ({student.klasse || 'Ingen klasse'}) - 4 fag: {subjects.join(', ')}
+                              </span>
+                              {ignored && <span className="warning-ignore-badge">Ignorert</span>}
+                            </div>
+                            {ignored ? (
+                              <div className="warning-ignore-row">
+                                <span className="warning-ignore-comment">Kommentar: {ignored.comment}</span>
+                                <button
+                                  type="button"
+                                  className="warning-inline-btn"
+                                  onClick={() => removeWarningIgnore(studentId)}
+                                >
+                                  Fjern ignorering
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="warning-ignore-row">
+                                <input
+                                  type="text"
+                                  maxLength={140}
+                                  className="warning-ignore-input"
+                                  placeholder="Kort kommentar for ignorering"
+                                  value={warningIgnoreDraftByStudentId[studentId] || ''}
+                                  onChange={(event) => {
+                                    const value = event.target.value;
+                                    setWarningIgnoreDraftByStudentId((prev) => ({
+                                      ...prev,
+                                      [studentId]: value,
+                                    }));
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="warning-inline-btn"
+                                  onClick={() => saveWarningIgnore(studentId)}
+                                  disabled={!(warningIgnoreDraftByStudentId[studentId] || '').trim()}
+                                >
+                                  Ignorer
+                                </button>
+                              </div>
+                            )}
                           </li>
                         );
                       })}
