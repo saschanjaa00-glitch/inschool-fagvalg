@@ -19,7 +19,13 @@ import { MergedDataView } from './components/MergedDataView';
 import { SubjectTally } from './components/SubjectTally';
 import { EleverView } from './components/EleverView';
 import { ChangeLogView } from './components/ChangeLogView';
+import { BalanseringView } from './components/BalanseringView';
 import type { SubjectSettingsByName } from './components/SubjectTally';
+import {
+  DEFAULT_CLASS_BLOCK_RESTRICTIONS,
+  type ClassBlockRestrictions,
+  type ProgressiveHybridBalanceResult,
+} from './utils/progressiveHybridBalance';
 
 const LOCAL_STORAGE_KEY = 'fagvalg-opptelling-state-v1';
 
@@ -35,6 +41,7 @@ interface PersistedAppState {
   subjectMaxByName?: Record<string, number>;
   blokkCount: number;
   selectedMergedSubject: string;
+  classBlockRestrictions?: ClassBlockRestrictions;
 }
 
 type WarningType = 'missing' | 'overloaded';
@@ -54,7 +61,7 @@ function App() {
   const [blokkCount, setBlokkCount] = useState(4);
   
   const [columnMapperExpanded, setColumnMapperExpanded] = useState(false);
-  const [activeDataTab, setActiveDataTab] = useState<'import' | 'subjects' | 'students' | 'elever' | 'changelog'>('import');
+  const [activeDataTab, setActiveDataTab] = useState<'import' | 'subjects' | 'students' | 'elever' | 'balancing' | 'changelog'>('import');
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningBlokkCollisionExpanded, setWarningBlokkCollisionExpanded] = useState(false);
   const [warningFewSubjectsExpanded, setWarningFewSubjectsExpanded] = useState(false);
@@ -66,6 +73,9 @@ function App() {
   const [warningIgnoreDraftByStudentId, setWarningIgnoreDraftByStudentId] = useState<Record<string, string>>({});
   const [selectedEleverStudentId, setSelectedEleverStudentId] = useState('');
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
+  const [classBlockRestrictions, setClassBlockRestrictions] = useState<ClassBlockRestrictions>(
+    DEFAULT_CLASS_BLOCK_RESTRICTIONS
+  );
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
   const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
   const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
@@ -144,6 +154,10 @@ function App() {
       if (typeof parsedState.selectedMergedSubject === 'string') {
         setSelectedMergedSubject(parsedState.selectedMergedSubject);
       }
+
+      if (parsedState.classBlockRestrictions && typeof parsedState.classBlockRestrictions === 'object') {
+        setClassBlockRestrictions(parsedState.classBlockRestrictions);
+      }
     } catch {
       // Ignore malformed localStorage data and continue with fresh state.
     } finally {
@@ -166,6 +180,7 @@ function App() {
       warningIgnoresByStudentAndType,
       blokkCount,
       selectedMergedSubject,
+      classBlockRestrictions,
     };
 
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(persistedState));
@@ -180,6 +195,7 @@ function App() {
     warningIgnoresByStudentAndType,
     blokkCount,
     selectedMergedSubject,
+    classBlockRestrictions,
   ]);
 
   const handleFilesAdded = (files: ParsedFile[]) => {
@@ -251,6 +267,54 @@ function App() {
     setWarningIgnoreDraftByStudentId({});
     setSelectedEleverStudentId('');
     setSelectedMergedSubject('');
+    setClassBlockRestrictions(DEFAULT_CLASS_BLOCK_RESTRICTIONS);
+  };
+
+  const handleApplyBalancingResult = (result: ProgressiveHybridBalanceResult) => {
+    if (result.moveRecords.length === 0 && result.diagnostics.unresolvedCollisions.length === 0) {
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const studentById = new Map<string, StandardField>();
+    mergedData.forEach((student, index) => {
+      const inferredId = student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
+      studentById.set(inferredId, student);
+    });
+
+    const changes: StudentAssignmentChange[] = result.moveRecords.map((move) => ({
+      studentId: move.studentId,
+      navn: move.studentName,
+      klasse: studentById.get(move.studentId)?.klasse || 'Ingen klasse',
+      subject: move.subjectName,
+      fromBlokk: move.fromBlock,
+      toBlokk: move.toBlock,
+      reason: `Balansering (${move.reason}): ${move.fromGroupCode} -> ${move.toGroupCode}, scoreDelta ${move.scoreDelta.toFixed(2)}`,
+      changedAt: nowIso,
+    }));
+
+    const unresolvedWarningChanges: StudentAssignmentChange[] = result.diagnostics.unresolvedCollisions.map((entry) => {
+      const separatorIndex = entry.lastIndexOf(':');
+      const studentId = separatorIndex >= 0 ? entry.slice(0, separatorIndex) : entry;
+      const subjectCode = separatorIndex >= 0 ? entry.slice(separatorIndex + 1) : 'UKJENT';
+      const student = studentById.get(studentId);
+
+      return {
+        studentId,
+        navn: student?.navn || 'Ukjent',
+        klasse: student?.klasse || 'Ingen klasse',
+        subject: subjectCode,
+        fromBlokk: 0,
+        toBlokk: 0,
+        reason: `ADVARSEL: Kunne ikke plassere elev uten kollisjon for fagkode ${subjectCode}`,
+        changedAt: nowIso,
+      };
+    });
+
+    setMergedData(result.updatedData);
+    setSubjects(tallySubjects(result.updatedData));
+    setSubjectSettingsByName(result.updatedSubjectSettingsByName as SubjectSettingsByName);
+    setStudentAssignmentChanges((prev) => [...prev, ...changes, ...unresolvedWarningChanges]);
   };
 
   const handleApplySubjectBlockMoves = (
@@ -883,7 +947,7 @@ function App() {
                   className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
                   onClick={() => setActiveDataTab('subjects')}
                 >
-                  Fagoversikt ({subjects.length} fag)
+                  Blokkoversikt
                 </button>
                 <button
                   type="button"
@@ -892,16 +956,16 @@ function App() {
                   className={`data-tab ${activeDataTab === 'elever' ? 'data-tab-active' : ''}`.trim()}
                   onClick={() => setActiveDataTab('elever')}
                 >
-                  Elever ({mergedData.length})
+                  Elever
                 </button>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeDataTab === 'students'}
-                  className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('students')}
+                  aria-selected={activeDataTab === 'balancing'}
+                  className={`data-tab ${activeDataTab === 'balancing' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('balancing')}
                 >
-                  Elevtabell ({mergedData.length} elever)
+                  Balansering
                 </button>
                 <button
                   type="button"
@@ -910,7 +974,16 @@ function App() {
                   className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
                   onClick={() => setActiveDataTab('changelog')}
                 >
-                  Endringslogg ({new Set(studentAssignmentChanges.map((entry) => entry.studentId)).size} elever)
+                  Endringslogg ({studentAssignmentChanges.length} endringer)
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataTab === 'students'}
+                  className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('students')}
+                >
+                  Elevtabell
                 </button>
               </div>
             </div>
@@ -1003,6 +1076,20 @@ function App() {
                   onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
                   onOpenStudentCard={handleOpenStudentInElever}
                 />
+              ) : activeDataTab === 'changelog' ? (
+                <ChangeLogView
+                  changeLog={studentAssignmentChanges}
+                  currentStudents={mergedData}
+                  onOpenStudentCard={handleOpenStudentInElever}
+                />
+              ) : activeDataTab === 'balancing' ? (
+                <BalanseringView
+                  mergedData={mergedData}
+                  subjectSettingsByName={subjectSettingsByName}
+                  restrictions={classBlockRestrictions}
+                  onRestrictionsChange={setClassBlockRestrictions}
+                  onApplyResult={handleApplyBalancingResult}
+                />
               ) : activeDataTab === 'students' ? (
                 <MergedDataView
                   data={filteredMergedData}
@@ -1011,12 +1098,6 @@ function App() {
                   onSubjectFilterChange={setSelectedMergedSubject}
                   subjectOptions={subjects.map((subject) => subject.subject)}
                   blokkCount={blokkCount}
-                />
-              ) : activeDataTab === 'changelog' ? (
-                <ChangeLogView
-                  changeLog={studentAssignmentChanges}
-                  currentStudents={mergedData}
-                  onOpenStudentCard={handleOpenStudentInElever}
                 />
               ) : (
                 <EleverView
