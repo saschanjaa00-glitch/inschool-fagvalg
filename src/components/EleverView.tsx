@@ -172,8 +172,7 @@ export const EleverView = ({
   const [activeFilter, setActiveFilter] = useState<StudentFilter>('all');
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [subjectToAdd, setSubjectToAdd] = useState('');
-  const [blokkToAdd, setBlokkToAdd] = useState('1');
-  const [groupToAdd, setGroupToAdd] = useState('');
+  const [blokkToAdd, setBlokkToAdd] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [editAssignment, setEditAssignment] = useState<EditAssignmentState | null>(null);
 
@@ -385,33 +384,32 @@ export const EleverView = ({
     return metrics;
   }, [data, blokkCount, subjectSettingsByName]);
 
-  const addGroupOptions = useMemo(() => {
+  const addBlokkOptions = useMemo(() => {
     const normalizedSubject = subjectToAdd.trim();
-    const blokkNumber = Number.parseInt(blokkToAdd, 10);
 
-    if (!normalizedSubject || Number.isNaN(blokkNumber) || blokkNumber < 1 || blokkNumber > blokkCount) {
+    if (!normalizedSubject) {
       return [];
     }
 
-    return getSubjectGroupOptionsForBlokk(normalizedSubject, blokkNumber);
-  }, [subjectToAdd, blokkToAdd, blokkCount, subjectSettingsByName]);
+    return getBlokkOptionsForSubject(normalizedSubject);
+  }, [subjectToAdd, blokkCount, subjectSettingsByName, groupMetricsBySubject]);
 
   useEffect(() => {
-    if (addGroupOptions.length === 0) {
-      setGroupToAdd('');
+    if (addBlokkOptions.length === 0) {
+      setBlokkToAdd('');
       return;
     }
 
-    const hasCurrent = addGroupOptions.some((option) => option.id === groupToAdd);
+    const hasCurrent = addBlokkOptions.some((blokk) => String(blokk) === blokkToAdd);
     if (!hasCurrent) {
-      setGroupToAdd(addGroupOptions[0].id);
+      setBlokkToAdd(String(addBlokkOptions[0]));
     }
-  }, [addGroupOptions, groupToAdd]);
+  }, [addBlokkOptions, blokkToAdd]);
 
-  const getSubjectGroupOptionsForBlokk = (subject: string, blokkNumber: number): SubjectGroupOption[] => {
+  function getSubjectGroupOptionsForBlokk(subject: string, blokkNumber: number): SubjectGroupOption[] {
     const metrics = groupMetricsBySubject[subject];
     return metrics?.optionsByBlokk[blokkNumber] || [];
-  };
+  }
 
   const getSubjectTotalsForBlokk = (subject: string, blokkNumber: number): { students: number; spaces: number } | null => {
     const metrics = groupMetricsBySubject[subject];
@@ -487,7 +485,7 @@ export const EleverView = ({
     });
   };
 
-  const getBlokkOptionsForSubject = (subject: string, includeBlokk?: number): number[] => {
+  function getBlokkOptionsForSubject(subject: string, includeBlokk?: number): number[] {
     const options = Array.from({ length: blokkCount }, (_, index) => index + 1)
       .filter((blokkNumber) => getSubjectGroupOptionsForBlokk(subject, blokkNumber).length > 0);
 
@@ -496,13 +494,13 @@ export const EleverView = ({
     }
 
     return options.sort((a, b) => a - b);
-  };
+  }
 
-  const chooseLeastPopulatedGroup = (
+  function chooseLeastPopulatedGroup(
     subject: string,
     blokkNumber: number,
     fallbackGroupId: string | null
-  ): string | null => {
+  ): string | null {
     const options = getSubjectGroupOptionsForBlokk(subject, blokkNumber);
 
     if (options.length === 0) {
@@ -518,7 +516,7 @@ export const EleverView = ({
 
     const randomIndex = Math.floor(Math.random() * candidates.length);
     return candidates[randomIndex].id;
-  };
+  }
 
   const selectedStudentEntry = useMemo(() => {
     return filteredStudents.find((entry) => entry.studentId === selectedStudentId) || null;
@@ -594,12 +592,6 @@ export const EleverView = ({
 
     const normalizedSubject = subjectToAdd.trim();
     const blokkNumber = Number.parseInt(blokkToAdd, 10);
-    const groupOptions = getSubjectGroupOptionsForBlokk(normalizedSubject, blokkNumber);
-    const selectedGroupId = ensureGroupForSubjectBlokk(
-      normalizedSubject,
-      blokkNumber,
-      groupToAdd || groupOptions[0]?.id
-    );
 
     if (!normalizedSubject) {
       applyStatusMessage('Skriv inn eller velg et fag først');
@@ -610,6 +602,15 @@ export const EleverView = ({
       applyStatusMessage('Velg en gyldig blokk');
       return;
     }
+
+    const validBlokker = getBlokkOptionsForSubject(normalizedSubject);
+    if (!validBlokker.includes(blokkNumber)) {
+      applyStatusMessage('Valgt blokk finnes ikke for dette faget');
+      return;
+    }
+
+    const seededGroupId = ensureGroupForSubjectBlokk(normalizedSubject, blokkNumber, undefined);
+    const selectedGroupId = chooseLeastPopulatedGroup(normalizedSubject, blokkNumber, seededGroupId);
 
     const alreadyAssigned = selectedStudentEntry.assignments.some((assignment) =>
       isSameSubject(assignment.subject, normalizedSubject)
@@ -649,7 +650,7 @@ export const EleverView = ({
     onStudentDataUpdate(nextData, [change]);
     saveSubjectGroupAssignment(normalizedSubject, selectedStudentEntry.studentId, selectedGroupId);
     setSubjectToAdd('');
-    setGroupToAdd('');
+    setBlokkToAdd('');
     applyStatusMessage(`${normalizedSubject} lagt til i Blokk ${blokkNumber}`);
   };
 
@@ -905,27 +906,24 @@ export const EleverView = ({
                   value={blokkToAdd}
                   onChange={(event) => setBlokkToAdd(event.target.value)}
                   className={styles.blokkSelect}
+                  disabled={addBlokkOptions.length === 0}
                 >
-                  {Array.from({ length: blokkCount }, (_, index) => index + 1).map((blokk) => (
-                    <option key={blokk} value={String(blokk)}>
-                      Blokk {blokk}
-                    </option>
-                  ))}
+                  {addBlokkOptions.length === 0 ? (
+                    <option value="">Ingen blokker for valgt fag</option>
+                  ) : (
+                    addBlokkOptions.map((blokk) => {
+                      const totals = getSubjectTotalsForBlokk(subjectToAdd.trim(), blokk);
+                      const students = totals?.students ?? 0;
+                      const spaces = totals?.spaces ?? 0;
+
+                      return (
+                        <option key={`add-blokk-${blokk}`} value={String(blokk)}>
+                          Blokk {blokk} ({students} / {spaces})
+                        </option>
+                      );
+                    })
+                  )}
                 </select>
-                {addGroupOptions.length > 0 && (
-                  <select
-                    value={groupToAdd}
-                    onChange={(event) => setGroupToAdd(event.target.value)}
-                    className={styles.blokkSelect}
-                    aria-label="Velg gruppe"
-                  >
-                    {addGroupOptions.map((group) => (
-                      <option key={`add-group-${group.id}`} value={group.id}>
-                        Gruppe {group.label} ({group.count})
-                      </option>
-                    ))}
-                  </select>
-                )}
                 <button type="button" className={styles.addButton} onClick={handleAddSubject}>
                   Legg til
                 </button>
