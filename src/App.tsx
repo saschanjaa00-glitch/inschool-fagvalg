@@ -603,6 +603,8 @@ function App() {
                   data={mergedData}
                   blokkCount={blokkCount}
                   subjectOptions={subjects.map((subject) => subject.subject)}
+                  subjectSettingsByName={subjectSettingsByName}
+                  onSaveSubjectSettingsByName={setSubjectSettingsByName}
                   changeLog={studentAssignmentChanges}
                   onStudentDataUpdate={handleStudentAssignmentsUpdated}
                 />

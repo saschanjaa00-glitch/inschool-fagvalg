@@ -266,6 +266,36 @@
   margin-left: 6px;
 }
 
+.groupToggleBtn {
+  border: 1px solid #bcbcbc;
+  background: #fff;
+  color: #444;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+.groupToggleBtn:hover {
+  background: #f3f3f3;
+}
+
+.groupMaxInput {
+  width: 48px;
+  margin-left: 6px;
+  padding: 1px 3px;
+  border: 1px solid #cbcbcb;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.groupMaxInput:focus {
+  outline: none;
+  border-color: #8f8f8f;
+}
+
 .groupEmptySlot {
   width: 100%;
   min-height: 30px;

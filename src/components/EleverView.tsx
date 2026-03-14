@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils';
+import type { SubjectSettingsByName } from './SubjectTally';
 import styles from './EleverView.module.css';
 
 type StudentFilter = 'all' | 'missing' | 'overloaded' | 'collisions' | 'duplicates';
@@ -8,6 +9,8 @@ interface EleverViewProps {
   data: StandardField[];
   blokkCount: number;
   subjectOptions: string[];
+  subjectSettingsByName: SubjectSettingsByName;
+  onSaveSubjectSettingsByName: (values: SubjectSettingsByName) => void;
   changeLog: StudentAssignmentChange[];
   onStudentDataUpdate: (updatedData: StandardField[], changes: StudentAssignmentChange[]) => void;
 }
@@ -17,9 +20,35 @@ interface AssignmentEntry {
   blokkNumber: number;
 }
 
-interface ExistingSubjectGroups {
-  subject: string;
-  blokker: Set<number>;
+type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
+
+interface SubjectGroupSetting {
+  id: string;
+  blokk: BlokkLabel;
+  sourceBlokk: BlokkLabel;
+  enabled: boolean;
+  max: number;
+  createdAt: string;
+}
+
+interface SubjectGroupOption {
+  id: string;
+  label: string;
+  count: number;
+  max: number;
+}
+
+interface SubjectGroupMetrics {
+  optionsByBlokk: Record<number, SubjectGroupOption[]>;
+  totalsByBlokk: Record<number, { students: number; spaces: number }>;
+}
+
+interface EditAssignmentState {
+  rowKey: string;
+  fromSubject: string;
+  fromBlokkNumber: number;
+  selectedSubject: string;
+  selectedBlokk: string;
 }
 
 const parseSubjects = (value: string | null): string[] => {
@@ -126,14 +155,16 @@ const formatTimestamp = (iso: string): string => {
   }).format(date);
 };
 
-const getTargetBlokker = (currentBlokk: number, blokkCount: number): number[] => {
-  return Array.from({ length: blokkCount }, (_, index) => index + 1).filter((blokk) => blokk !== currentBlokk);
+const makeGroupId = () => {
+  return `group-${Math.random().toString(36).slice(2, 11)}`;
 };
 
 export const EleverView = ({
   data,
   blokkCount,
   subjectOptions,
+  subjectSettingsByName,
+  onSaveSubjectSettingsByName,
   changeLog,
   onStudentDataUpdate,
 }: EleverViewProps) => {
@@ -142,8 +173,9 @@ export const EleverView = ({
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [subjectToAdd, setSubjectToAdd] = useState('');
   const [blokkToAdd, setBlokkToAdd] = useState('1');
+  const [groupToAdd, setGroupToAdd] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
-  const [moveTargetsByAssignment, setMoveTargetsByAssignment] = useState<Record<string, string>>({});
+  const [editAssignment, setEditAssignment] = useState<EditAssignmentState | null>(null);
 
   const studentSummaries = useMemo(() => {
     return data.map((student, index) => {
@@ -161,39 +193,6 @@ export const EleverView = ({
       };
     });
   }, [data, blokkCount]);
-
-  const existingSubjectGroups = useMemo(() => {
-    const groups: ExistingSubjectGroups[] = [];
-
-    data.forEach((student) => {
-      const assignments = extractAssignments(student, blokkCount);
-      assignments.forEach((assignment) => {
-        const existing = groups.find((entry) => isSameSubject(entry.subject, assignment.subject));
-        if (existing) {
-          existing.blokker.add(assignment.blokkNumber);
-          return;
-        }
-
-        groups.push({
-          subject: assignment.subject,
-          blokker: new Set([assignment.blokkNumber]),
-        });
-      });
-    });
-
-    return groups;
-  }, [data, blokkCount]);
-
-  const getExistingTargetBlokker = (subject: string, currentBlokk: number): number[] => {
-    const allOtherBlokker = getTargetBlokker(currentBlokk, blokkCount);
-    const existingForSubject = existingSubjectGroups.find((entry) => isSameSubject(entry.subject, subject));
-
-    if (!existingForSubject) {
-      return [];
-    }
-
-    return allOtherBlokker.filter((blokk) => existingForSubject.blokker.has(blokk));
-  };
 
   const counts = useMemo(() => {
     return {
@@ -240,8 +239,286 @@ export const EleverView = ({
   }, [filteredStudents, selectedStudentId]);
 
   useEffect(() => {
-    setMoveTargetsByAssignment({});
+    setEditAssignment(null);
   }, [selectedStudentId]);
+
+  const getSubjectGroupMetrics = (subject: string): SubjectGroupMetrics => {
+    const result: SubjectGroupMetrics = {
+      optionsByBlokk: {},
+      totalsByBlokk: {},
+    };
+
+    const subjectSettings = subjectSettingsByName[subject];
+    const groups = ((subjectSettings?.groups || []) as SubjectGroupSetting[]).slice();
+    const assignments = subjectSettings?.groupStudentAssignments || {};
+    const defaultMax = typeof subjectSettings?.defaultMax === 'number' ? subjectSettings.defaultMax : 30;
+
+    const subjectCountsByBlokk: Record<number, number> = {};
+    for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
+      let count = 0;
+      data.forEach((student) => {
+        const blokkValue = student[getBlokkKey(blokkNumber)] as string | null;
+        const subjectsInBlokk = parseSubjects(blokkValue);
+        if (subjectsInBlokk.some((entry) => isSameSubject(entry, subject))) {
+          count += 1;
+        }
+      });
+      subjectCountsByBlokk[blokkNumber] = count;
+    }
+
+    const enabledByBlokk = new Map<number, SubjectGroupSetting[]>();
+
+    groups
+      .filter((group) => group.enabled !== false)
+      .forEach((group) => {
+        const blokkNumber = Number.parseInt(group.blokk.replace('Blokk ', ''), 10);
+        if (Number.isNaN(blokkNumber)) {
+          return;
+        }
+
+        const current = enabledByBlokk.get(blokkNumber) || [];
+        current.push(group);
+        enabledByBlokk.set(blokkNumber, current);
+      });
+
+    // Fallback: if a subject exists in a blokk but no persisted group is present, infer one group.
+    Object.entries(subjectCountsByBlokk).forEach(([blokkKey, count]) => {
+      const blokkNumber = Number.parseInt(blokkKey, 10);
+      if (!Number.isFinite(blokkNumber) || count <= 0) {
+        return;
+      }
+
+      if (enabledByBlokk.has(blokkNumber)) {
+        return;
+      }
+
+      const inferredGroup: SubjectGroupSetting = {
+        id: `inferred-${subject}-${blokkNumber}`,
+        blokk: `Blokk ${blokkNumber}` as BlokkLabel,
+        sourceBlokk: `Blokk ${blokkNumber}` as BlokkLabel,
+        enabled: true,
+        max: defaultMax,
+        createdAt: '',
+      };
+
+      enabledByBlokk.set(blokkNumber, [inferredGroup]);
+    });
+
+    enabledByBlokk.forEach((list, blokkNumber) => {
+      list.sort((left, right) => {
+        if ((left.createdAt || '') !== (right.createdAt || '')) {
+          return (left.createdAt || '').localeCompare(right.createdAt || '');
+        }
+        return (left.id || '').localeCompare(right.id || '');
+      });
+
+      const countsByGroupId: Record<string, number> = {};
+      list.forEach((group) => {
+        countsByGroupId[group.id] = 0;
+      });
+
+      const studentIdsInBlokk: string[] = [];
+
+      data.forEach((student, index) => {
+        const studentId = getStudentId(student, index);
+        const blokkValue = student[getBlokkKey(blokkNumber)] as string | null;
+        const subjectsInBlokk = parseSubjects(blokkValue);
+        if (subjectsInBlokk.some((entry) => isSameSubject(entry, subject))) {
+          studentIdsInBlokk.push(studentId);
+        }
+      });
+
+      let unassignedCount = 0;
+      studentIdsInBlokk.forEach((studentId) => {
+        const assignedGroupId = assignments[studentId];
+        if (assignedGroupId && countsByGroupId[assignedGroupId] !== undefined) {
+          countsByGroupId[assignedGroupId] += 1;
+          return;
+        }
+        unassignedCount += 1;
+      });
+
+      if (unassignedCount > 0 && list.length > 0) {
+        const base = Math.floor(unassignedCount / list.length);
+        const remainder = unassignedCount % list.length;
+
+        list.forEach((group, index) => {
+          countsByGroupId[group.id] += base + (index < remainder ? 1 : 0);
+        });
+      }
+
+      const options = list.map((group, index) => ({
+        id: group.id,
+        label: `${blokkNumber}-${index + 1}`,
+        count: countsByGroupId[group.id] || 0,
+        max: typeof group.max === 'number' ? Math.max(0, group.max) : 0,
+      }));
+
+      result.optionsByBlokk[blokkNumber] = options;
+      result.totalsByBlokk[blokkNumber] = {
+        students: options.reduce((sum, option) => sum + option.count, 0),
+        spaces: options.reduce((sum, option) => sum + option.max, 0),
+      };
+    });
+
+    return result;
+  };
+
+  const groupMetricsBySubject = useMemo(() => {
+    const metrics: Record<string, SubjectGroupMetrics> = {};
+    const subjectsInData = new Set<string>();
+
+    data.forEach((student) => {
+      for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
+        parseSubjects(student[getBlokkKey(blokkNumber)] as string | null).forEach((subject) => {
+          subjectsInData.add(subject);
+        });
+      }
+    });
+
+    Object.keys(subjectSettingsByName).forEach((subject) => subjectsInData.add(subject));
+
+    subjectsInData.forEach((subject) => {
+      metrics[subject] = getSubjectGroupMetrics(subject);
+    });
+
+    return metrics;
+  }, [data, blokkCount, subjectSettingsByName]);
+
+  const addGroupOptions = useMemo(() => {
+    const normalizedSubject = subjectToAdd.trim();
+    const blokkNumber = Number.parseInt(blokkToAdd, 10);
+
+    if (!normalizedSubject || Number.isNaN(blokkNumber) || blokkNumber < 1 || blokkNumber > blokkCount) {
+      return [];
+    }
+
+    return getSubjectGroupOptionsForBlokk(normalizedSubject, blokkNumber);
+  }, [subjectToAdd, blokkToAdd, blokkCount, subjectSettingsByName]);
+
+  useEffect(() => {
+    if (addGroupOptions.length === 0) {
+      setGroupToAdd('');
+      return;
+    }
+
+    const hasCurrent = addGroupOptions.some((option) => option.id === groupToAdd);
+    if (!hasCurrent) {
+      setGroupToAdd(addGroupOptions[0].id);
+    }
+  }, [addGroupOptions, groupToAdd]);
+
+  const getSubjectGroupOptionsForBlokk = (subject: string, blokkNumber: number): SubjectGroupOption[] => {
+    const metrics = groupMetricsBySubject[subject];
+    return metrics?.optionsByBlokk[blokkNumber] || [];
+  };
+
+  const getSubjectTotalsForBlokk = (subject: string, blokkNumber: number): { students: number; spaces: number } | null => {
+    const metrics = groupMetricsBySubject[subject];
+    if (!metrics) {
+      return null;
+    }
+
+    return metrics.totalsByBlokk[blokkNumber] || null;
+  };
+
+  const ensureGroupForSubjectBlokk = (
+    subject: string,
+    blokkNumber: number,
+    preferredGroupId?: string
+  ): string | null => {
+    const blokkLabel = `Blokk ${blokkNumber}` as BlokkLabel;
+    const currentSubjectSettings = subjectSettingsByName[subject] || { defaultMax: 30, groups: [] };
+    const currentGroups = ((currentSubjectSettings.groups || []) as SubjectGroupSetting[]).slice();
+
+    const enabledInBlokk = currentGroups.filter((group) => group.blokk === blokkLabel && group.enabled !== false);
+
+    if (preferredGroupId && enabledInBlokk.some((group) => group.id === preferredGroupId)) {
+      return preferredGroupId;
+    }
+
+    if (enabledInBlokk.length > 0) {
+      return enabledInBlokk[0].id;
+    }
+
+    const newGroupId = makeGroupId();
+    const defaultMax = typeof currentSubjectSettings.defaultMax === 'number'
+      ? currentSubjectSettings.defaultMax
+      : 30;
+
+    const newGroup = {
+      id: newGroupId,
+      blokk: blokkLabel,
+      sourceBlokk: blokkLabel,
+      enabled: true,
+      max: defaultMax,
+      createdAt: new Date().toISOString(),
+    };
+
+    onSaveSubjectSettingsByName({
+      ...subjectSettingsByName,
+      [subject]: {
+        ...currentSubjectSettings,
+        groups: [...currentGroups, newGroup],
+      },
+    });
+
+    return newGroupId;
+  };
+
+  const saveSubjectGroupAssignment = (subject: string, studentId: string, groupId: string | null) => {
+    const currentSubjectSettings = subjectSettingsByName[subject] || { defaultMax: 30, groups: [] };
+    const currentAssignments = {
+      ...(currentSubjectSettings.groupStudentAssignments || {}),
+    };
+
+    if (groupId) {
+      currentAssignments[studentId] = groupId;
+    } else {
+      delete currentAssignments[studentId];
+    }
+
+    onSaveSubjectSettingsByName({
+      ...subjectSettingsByName,
+      [subject]: {
+        ...currentSubjectSettings,
+        groupStudentAssignments: currentAssignments,
+      },
+    });
+  };
+
+  const getBlokkOptionsForSubject = (subject: string, includeBlokk?: number): number[] => {
+    const options = Array.from({ length: blokkCount }, (_, index) => index + 1)
+      .filter((blokkNumber) => getSubjectGroupOptionsForBlokk(subject, blokkNumber).length > 0);
+
+    if (includeBlokk && !options.includes(includeBlokk)) {
+      options.push(includeBlokk);
+    }
+
+    return options.sort((a, b) => a - b);
+  };
+
+  const chooseLeastPopulatedGroup = (
+    subject: string,
+    blokkNumber: number,
+    fallbackGroupId: string | null
+  ): string | null => {
+    const options = getSubjectGroupOptionsForBlokk(subject, blokkNumber);
+
+    if (options.length === 0) {
+      return fallbackGroupId;
+    }
+
+    const minCount = options.reduce((min, option) => Math.min(min, option.count), Infinity);
+    const candidates = options.filter((option) => option.count === minCount);
+
+    if (candidates.length === 0) {
+      return fallbackGroupId;
+    }
+
+    const randomIndex = Math.floor(Math.random() * candidates.length);
+    return candidates[randomIndex].id;
+  };
 
   const selectedStudentEntry = useMemo(() => {
     return filteredStudents.find((entry) => entry.studentId === selectedStudentId) || null;
@@ -306,6 +583,7 @@ export const EleverView = ({
     };
 
     onStudentDataUpdate(nextData, [change]);
+    saveSubjectGroupAssignment(subject, selectedStudentEntry.studentId, null);
     applyStatusMessage(`${subject} fjernet fra Blokk ${blokkNumber}`);
   };
 
@@ -316,6 +594,12 @@ export const EleverView = ({
 
     const normalizedSubject = subjectToAdd.trim();
     const blokkNumber = Number.parseInt(blokkToAdd, 10);
+    const groupOptions = getSubjectGroupOptionsForBlokk(normalizedSubject, blokkNumber);
+    const selectedGroupId = ensureGroupForSubjectBlokk(
+      normalizedSubject,
+      blokkNumber,
+      groupToAdd || groupOptions[0]?.id
+    );
 
     if (!normalizedSubject) {
       applyStatusMessage('Skriv inn eller velg et fag først');
@@ -363,25 +647,64 @@ export const EleverView = ({
     };
 
     onStudentDataUpdate(nextData, [change]);
+    saveSubjectGroupAssignment(normalizedSubject, selectedStudentEntry.studentId, selectedGroupId);
     setSubjectToAdd('');
+    setGroupToAdd('');
     applyStatusMessage(`${normalizedSubject} lagt til i Blokk ${blokkNumber}`);
   };
 
-  const handleMoveAssignment = (subject: string, fromBlokk: number, toBlokk: number) => {
-    if (!selectedStudentEntry) {
+  const openEditAssignment = (assignment: AssignmentEntry, rowKey: string) => {
+    const subject = assignment.subject;
+    const blokkNumber = assignment.blokkNumber;
+    const blokkOptions = getBlokkOptionsForSubject(subject, blokkNumber);
+    const initialBlokk = blokkOptions.includes(blokkNumber)
+      ? blokkNumber
+      : (blokkOptions[0] ?? blokkNumber);
+
+    setEditAssignment({
+      rowKey,
+      fromSubject: subject,
+      fromBlokkNumber: blokkNumber,
+      selectedSubject: subject,
+      selectedBlokk: String(initialBlokk),
+    });
+  };
+
+  const handleSaveEditAssignment = () => {
+    if (!selectedStudentEntry || !editAssignment) {
       return;
     }
 
-    const targetBlokker = getExistingTargetBlokker(subject, fromBlokk);
-    if (targetBlokker.length === 0) {
-      applyStatusMessage('Ingen eksisterende grupper tilgjengelig for dette faget i andre blokker');
+    const fromSubject = editAssignment.fromSubject;
+    const fromBlokk = editAssignment.fromBlokkNumber;
+    const toSubject = editAssignment.selectedSubject.trim();
+    const toBlokk = Number.parseInt(editAssignment.selectedBlokk, 10);
+
+    if (!toSubject) {
+      applyStatusMessage('Velg et fag');
       return;
     }
 
-    if (!targetBlokker.includes(toBlokk)) {
-      applyStatusMessage('Ugyldig blokkvalg');
+    if (Number.isNaN(toBlokk) || toBlokk < 1 || toBlokk > blokkCount) {
+      applyStatusMessage('Velg en gyldig blokk');
       return;
     }
+
+    const duplicateElsewhere = selectedStudentEntry.assignments.some((assignment) => {
+      if (!isSameSubject(assignment.subject, toSubject)) {
+        return false;
+      }
+
+      return !(isSameSubject(assignment.subject, fromSubject) && assignment.blokkNumber === fromBlokk);
+    });
+
+    if (duplicateElsewhere) {
+      applyStatusMessage('Eleven har allerede dette faget et annet sted');
+      return;
+    }
+
+    const seededGroupId = ensureGroupForSubjectBlokk(toSubject, toBlokk, undefined);
+    const targetGroupId = chooseLeastPopulatedGroup(toSubject, toBlokk, seededGroupId);
 
     const nextData = data.map((student, index) => {
       const currentId = getStudentId(student, index);
@@ -394,23 +717,27 @@ export const EleverView = ({
       const fromSubjects = parseSubjects(student[fromKey] as string | null);
       const toSubjects = parseSubjects(student[toKey] as string | null);
 
-      let moved = false;
+      let removed = false;
       const remainingSourceSubjects = fromSubjects.filter((item) => {
-        if (!moved && isSameSubject(item, subject)) {
-          moved = true;
+        if (!removed && isSameSubject(item, fromSubject)) {
+          removed = true;
           return false;
         }
         return true;
       });
 
-      if (!moved) {
+      if (!removed) {
         return student;
       }
+
+      const nextTargetSubjects = toSubjects.some((item) => isSameSubject(item, toSubject))
+        ? toSubjects
+        : [...toSubjects, toSubject];
 
       return {
         ...student,
         [fromKey]: remainingSourceSubjects.length > 0 ? remainingSourceSubjects.join(', ') : null,
-        [toKey]: [...toSubjects, subject].join(', '),
+        [toKey]: nextTargetSubjects.join(', '),
       };
     });
 
@@ -418,15 +745,59 @@ export const EleverView = ({
       studentId: selectedStudentEntry.studentId,
       navn: selectedStudentEntry.student.navn || 'Ukjent',
       klasse: selectedStudentEntry.student.klasse || 'Ingen klasse',
-      subject,
+      subject: toSubject,
       fromBlokk,
       toBlokk,
-      reason: `Elever: flyttet ${subject} fra Blokk ${fromBlokk} til Blokk ${toBlokk}`,
+      reason: `Elever: endret ${fromSubject} (Blokk ${fromBlokk}) til ${toSubject} (Blokk ${toBlokk})`,
       changedAt: new Date().toISOString(),
     };
 
     onStudentDataUpdate(nextData, [change]);
-    applyStatusMessage(`${subject} flyttet til Blokk ${toBlokk}`);
+    if (!isSameSubject(fromSubject, toSubject)) {
+      saveSubjectGroupAssignment(fromSubject, selectedStudentEntry.studentId, null);
+    }
+    saveSubjectGroupAssignment(toSubject, selectedStudentEntry.studentId, targetGroupId);
+    setEditAssignment(null);
+    applyStatusMessage(`Oppdatert til ${toSubject} i Blokk ${toBlokk}`);
+  };
+
+  const modalSubjectOptions = useMemo(() => {
+    const set = new Set(subjectOptions);
+    if (editAssignment?.fromSubject) {
+      set.add(editAssignment.fromSubject);
+    }
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
+  }, [subjectOptions, editAssignment]);
+
+  const modalBlokkOptions = useMemo(() => {
+    if (!editAssignment) {
+      return [] as number[];
+    }
+
+    const includeCurrent = isSameSubject(editAssignment.selectedSubject, editAssignment.fromSubject)
+      ? editAssignment.fromBlokkNumber
+      : undefined;
+
+    return getBlokkOptionsForSubject(editAssignment.selectedSubject, includeCurrent);
+  }, [editAssignment, groupMetricsBySubject, blokkCount]);
+
+  const handleModalSubjectChange = (value: string) => {
+    if (!editAssignment) {
+      return;
+    }
+
+    const includeCurrent = isSameSubject(value, editAssignment.fromSubject)
+      ? editAssignment.fromBlokkNumber
+      : undefined;
+    const blokkOptions = getBlokkOptionsForSubject(value, includeCurrent);
+    const nextBlokk = blokkOptions[0] ?? editAssignment.fromBlokkNumber;
+
+    setEditAssignment({
+      ...editAssignment,
+      selectedSubject: value,
+      selectedBlokk: String(nextBlokk),
+    });
   };
 
   if (data.length === 0) {
@@ -541,6 +912,20 @@ export const EleverView = ({
                     </option>
                   ))}
                 </select>
+                {addGroupOptions.length > 0 && (
+                  <select
+                    value={groupToAdd}
+                    onChange={(event) => setGroupToAdd(event.target.value)}
+                    className={styles.blokkSelect}
+                    aria-label="Velg gruppe"
+                  >
+                    {addGroupOptions.map((group) => (
+                      <option key={`add-group-${group.id}`} value={group.id}>
+                        Gruppe {group.label} ({group.count})
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button type="button" className={styles.addButton} onClick={handleAddSubject}>
                   Legg til
                 </button>
@@ -572,44 +957,20 @@ export const EleverView = ({
                       })
                       .map((assignment, index) => {
                         const rowKey = `${assignment.subject}-${assignment.blokkNumber}-${index}`;
-                        const targetBlokker = getExistingTargetBlokker(assignment.subject, assignment.blokkNumber);
-                        const selectedTarget = moveTargetsByAssignment[rowKey] || String(targetBlokker[0] || '');
 
                         return (
                         <tr key={rowKey}>
                           <td>{assignment.subject}</td>
                           <td>Blokk {assignment.blokkNumber}</td>
                           <td className={styles.actionsCell}>
-                            {targetBlokker.length > 0 && (
-                              <>
-                                <select
-                                  className={styles.moveSelect}
-                                  value={selectedTarget}
-                                  onChange={(event) => {
-                                    const value = event.target.value;
-                                    setMoveTargetsByAssignment((prev) => ({
-                                      ...prev,
-                                      [rowKey]: value,
-                                    }));
-                                  }}
-                                  aria-label={`Velg ny blokk for ${assignment.subject}`}
-                                >
-                                  {targetBlokker.map((blokk) => (
-                                    <option key={`${rowKey}-${blokk}`} value={String(blokk)}>
-                                      Blokk {blokk}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button
-                                  type="button"
-                                  className={styles.moveButton}
-                                  onClick={() => handleMoveAssignment(assignment.subject, assignment.blokkNumber, Number.parseInt(selectedTarget, 10))}
-                                  title={`Flytt ${assignment.subject} til valgt blokk`}
-                                >
-                                  Endre blokk
-                                </button>
-                              </>
-                            )}
+                            <button
+                              type="button"
+                              className={styles.moveButton}
+                              onClick={() => openEditAssignment(assignment, rowKey)}
+                              title={`Endre ${assignment.subject}`}
+                            >
+                              Endre
+                            </button>
                             <button
                               type="button"
                               className={styles.removeButton}
@@ -623,6 +984,71 @@ export const EleverView = ({
                   )}
                 </tbody>
               </table>
+
+              {editAssignment && (
+                <div className={styles.modalOverlay} onClick={() => setEditAssignment(null)}>
+                  <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+                    <h4>Endre fagvalg</h4>
+                    <div className={styles.modalRow}>
+                      <label className={styles.modalLabel} htmlFor="edit-subject-select">Fag</label>
+                      <select
+                        id="edit-subject-select"
+                        className={styles.moveSelect}
+                        value={editAssignment.selectedSubject}
+                        onChange={(event) => handleModalSubjectChange(event.target.value)}
+                      >
+                        {modalSubjectOptions.map((subject) => (
+                          <option key={`edit-subject-${subject}`} value={subject}>
+                            {subject}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className={styles.modalRow}>
+                      <label className={styles.modalLabel} htmlFor="edit-blokk-select">Blokk</label>
+                      <select
+                        id="edit-blokk-select"
+                        className={styles.moveSelect}
+                        value={editAssignment.selectedBlokk}
+                        onChange={(event) => {
+                          setEditAssignment({
+                            ...editAssignment,
+                            selectedBlokk: event.target.value,
+                          });
+                        }}
+                      >
+                        {modalBlokkOptions.map((blokk) => {
+                          const totals = getSubjectTotalsForBlokk(editAssignment.selectedSubject, blokk);
+                          const students = totals?.students ?? 0;
+                          const spaces = totals?.spaces ?? 0;
+
+                          return (
+                            <option key={`edit-blokk-${blokk}`} value={String(blokk)}>
+                              Blokk {blokk} ({students} / {spaces})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    <div className={styles.modalActions}>
+                      <button
+                        type="button"
+                        className={styles.removeButton}
+                        onClick={() => setEditAssignment(null)}
+                      >
+                        Avbryt
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.moveButton}
+                        onClick={handleSaveEditAssignment}
+                      >
+                        Lagre
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className={styles.logPanel}>
                 <h4>Endringslogg ({selectedStudentChanges.length})</h4>

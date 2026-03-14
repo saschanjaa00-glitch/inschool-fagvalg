@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { SubjectCount, StandardField } from '../utils/excelUtils';
 import { loadXlsx } from '../utils/excelUtils';
 import styles from './SubjectTally.module.css';
@@ -24,11 +24,23 @@ interface MathOptionCount {
 
 type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
 
+interface SubjectGroup {
+  id: string;
+  blokk: BlokkLabel;
+  sourceBlokk: BlokkLabel;
+  enabled: boolean;
+  max: number;
+  createdAt: string;
+}
+
 interface SubjectSettings {
   defaultMax: number;
-  blokkMaxOverrides: Partial<Record<BlokkLabel, number>>;
-  blokkEnabled: Partial<Record<BlokkLabel, boolean>>;
-  blokkOrder: BlokkLabel[];
+  groups?: SubjectGroup[];
+  groupStudentAssignments?: Record<string, string>;
+  // Legacy fields retained for backwards compatibility with persisted state.
+  blokkMaxOverrides?: Partial<Record<BlokkLabel, number>>;
+  blokkEnabled?: Partial<Record<BlokkLabel, boolean>>;
+  blokkOrder?: BlokkLabel[];
   extraGroupCounts?: Partial<Record<BlokkLabel, number>>;
 }
 
@@ -36,20 +48,22 @@ export type SubjectSettingsByName = Record<string, SubjectSettings>;
 
 interface SubjectDraft {
   defaultMax: string;
-  blokkMaxOverrides: Partial<Record<BlokkLabel, string>>;
-  blokkEnabled: Record<BlokkLabel, boolean>;
-  blokkOrder: BlokkLabel[];
 }
+
+interface ResolvedGroup extends SubjectGroup {
+  label: string;
+  allocatedCount: number;
+  overfilled: boolean;
+}
+
+type StudentIdsByBlokk = Record<BlokkLabel, string[]>;
 
 const DEFAULT_MAX_PER_SUBJECT = 30;
 const BLOKK_LABELS: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'];
 
 const buildDefaultSettings = (): SubjectSettings => ({
   defaultMax: DEFAULT_MAX_PER_SUBJECT,
-  blokkMaxOverrides: {},
-  blokkEnabled: {},
-  blokkOrder: [...BLOKK_LABELS],
-  extraGroupCounts: {},
+  groups: [],
 });
 
 const normalizeOrder = (order?: BlokkLabel[]): BlokkLabel[] => {
@@ -59,39 +73,291 @@ const normalizeOrder = (order?: BlokkLabel[]): BlokkLabel[] => {
   });
 };
 
-const sanitizeCount = (value: string | number | undefined): number => {
+const sanitizeCount = (value: string | number | undefined, fallback: number = DEFAULT_MAX_PER_SUBJECT): number => {
   if (typeof value === 'number') {
-    return Number.isNaN(value) ? DEFAULT_MAX_PER_SUBJECT : Math.max(0, value);
+    return Number.isNaN(value) ? fallback : Math.max(0, Math.floor(value));
   }
 
   const parsed = Number.parseInt(value || '', 10);
-  return Number.isNaN(parsed) ? DEFAULT_MAX_PER_SUBJECT : Math.max(0, parsed);
+  return Number.isNaN(parsed) ? fallback : Math.max(0, parsed);
 };
 
-const getSettingsForSubject = (subjectSettingsByName: SubjectSettingsByName, subject: string): SubjectSettings => {
+const makeGroupId = () => {
+  return `group-${Math.random().toString(36).slice(2, 11)}`;
+};
+
+const makeGroup = (
+  blokk: BlokkLabel,
+  sourceBlokk: BlokkLabel,
+  max: number,
+  enabled: boolean,
+  createdAt?: string
+): SubjectGroup => ({
+  id: makeGroupId(),
+  blokk,
+  sourceBlokk,
+  enabled,
+  max: sanitizeCount(max),
+  createdAt: createdAt || new Date().toISOString(),
+});
+
+const sanitizeGroups = (groups: SubjectGroup[] | undefined, defaultMax: number): SubjectGroup[] => {
+  if (!Array.isArray(groups)) {
+    return [];
+  }
+
+  const seenIds = new Set<string>();
+
+  return groups
+    .filter((group) => BLOKK_LABELS.includes(group.blokk))
+    .map((group) => {
+      const id = group.id && !seenIds.has(group.id) ? group.id : makeGroupId();
+      seenIds.add(id);
+
+      return {
+        id,
+        blokk: group.blokk,
+        sourceBlokk: BLOKK_LABELS.includes(group.sourceBlokk as BlokkLabel)
+          ? (group.sourceBlokk as BlokkLabel)
+          : group.blokk,
+        enabled: group.enabled !== false,
+        max: sanitizeCount(group.max, defaultMax),
+        createdAt: group.createdAt || new Date().toISOString(),
+      };
+    });
+};
+
+const getBlokkNumber = (label: BlokkLabel): number => {
+  return Number.parseInt(label.replace('Blokk ', ''), 10);
+};
+
+const buildLegacyGroups = (
+  raw: SubjectSettings,
+  defaultMax: number,
+  blokkBreakdown: Record<BlokkLabel, number>
+): SubjectGroup[] => {
+  const groups: SubjectGroup[] = [];
+  const placement = normalizeOrder(raw.blokkOrder);
+
+  BLOKK_LABELS.forEach((sourceBlokk, sourceIndex) => {
+    const targetBlokk = placement[sourceIndex] ?? sourceBlokk;
+    const hasImportData = blokkBreakdown[sourceBlokk] > 0;
+    const explicitEnabled = raw.blokkEnabled?.[sourceBlokk];
+    const shouldCreate = hasImportData || typeof explicitEnabled === 'boolean';
+
+    if (!shouldCreate) {
+      return;
+    }
+
+    const max = sanitizeCount(raw.blokkMaxOverrides?.[sourceBlokk], defaultMax);
+    const enabled = explicitEnabled ?? hasImportData;
+    groups.push(makeGroup(targetBlokk, sourceBlokk, max, enabled));
+  });
+
+  BLOKK_LABELS.forEach((targetBlokk) => {
+    const extras = Math.max(0, Math.floor(raw.extraGroupCounts?.[targetBlokk] ?? 0));
+    for (let i = 0; i < extras; i += 1) {
+      const max = sanitizeCount(raw.blokkMaxOverrides?.[targetBlokk], defaultMax);
+      groups.push(makeGroup(targetBlokk, targetBlokk, max, true));
+    }
+  });
+
+  return groups;
+};
+
+const buildImportGroups = (
+  defaultMax: number,
+  blokkBreakdown: Record<BlokkLabel, number>
+): SubjectGroup[] => {
+  const groups: SubjectGroup[] = [];
+
+  BLOKK_LABELS.forEach((blokk) => {
+    if (blokkBreakdown[blokk] > 0) {
+      groups.push(makeGroup(blokk, blokk, defaultMax, true));
+    }
+  });
+
+  return groups;
+};
+
+const getSettingsForSubject = (
+  subjectSettingsByName: SubjectSettingsByName,
+  subject: string,
+  blokkBreakdown: Record<BlokkLabel, number>
+): SubjectSettings => {
   const raw = subjectSettingsByName[subject];
 
   if (!raw) {
-    return buildDefaultSettings();
+    const defaults = buildDefaultSettings();
+    return {
+      ...defaults,
+      groupStudentAssignments: {},
+      groups: buildImportGroups(defaults.defaultMax, blokkBreakdown),
+    };
+  }
+
+  const defaultMax = sanitizeCount(raw.defaultMax);
+  const explicitGroups = sanitizeGroups(raw.groups, defaultMax);
+  const groupStudentAssignments = (raw.groupStudentAssignments && typeof raw.groupStudentAssignments === 'object')
+    ? { ...raw.groupStudentAssignments }
+    : {};
+
+  if (explicitGroups.length > 0) {
+    return {
+      defaultMax,
+      groupStudentAssignments,
+      groups: explicitGroups,
+    };
+  }
+
+  const hasLegacyConfig =
+    !!raw.blokkOrder
+    || !!raw.blokkEnabled
+    || !!raw.blokkMaxOverrides
+    || !!raw.extraGroupCounts;
+
+  if (!hasLegacyConfig) {
+    return {
+      defaultMax,
+      groupStudentAssignments,
+      groups: buildImportGroups(defaultMax, blokkBreakdown),
+    };
   }
 
   return {
-    defaultMax: sanitizeCount(raw.defaultMax),
-    blokkMaxOverrides: { ...raw.blokkMaxOverrides },
-    blokkEnabled: {
-      'Blokk 1': raw.blokkEnabled?.['Blokk 1'],
-      'Blokk 2': raw.blokkEnabled?.['Blokk 2'],
-      'Blokk 3': raw.blokkEnabled?.['Blokk 3'],
-      'Blokk 4': raw.blokkEnabled?.['Blokk 4'],
-    },
-    blokkOrder: normalizeOrder(raw.blokkOrder),
-    extraGroupCounts: {
-      'Blokk 1': Math.max(0, Math.floor(raw.extraGroupCounts?.['Blokk 1'] ?? 0)),
-      'Blokk 2': Math.max(0, Math.floor(raw.extraGroupCounts?.['Blokk 2'] ?? 0)),
-      'Blokk 3': Math.max(0, Math.floor(raw.extraGroupCounts?.['Blokk 3'] ?? 0)),
-      'Blokk 4': Math.max(0, Math.floor(raw.extraGroupCounts?.['Blokk 4'] ?? 0)),
-    },
+    defaultMax,
+    groupStudentAssignments,
+    groups: buildLegacyGroups(raw, defaultMax, blokkBreakdown),
   };
+};
+
+const shouldShowGroup = (group: ResolvedGroup): boolean => {
+  return group.allocatedCount > 0 || group.enabled;
+};
+
+const allocateCountsEvenlyAcrossGroups = (totalCount: number, groups: SubjectGroup[]): Record<string, number> => {
+  const allocation: Record<string, number> = {};
+  groups.forEach((group) => {
+    allocation[group.id] = 0;
+  });
+
+  const enabledGroups = groups.filter((group) => group.enabled);
+  if (enabledGroups.length === 0) {
+    return allocation;
+  }
+
+  const safeTotal = Math.max(0, totalCount);
+  const base = Math.floor(safeTotal / enabledGroups.length);
+  const remainder = safeTotal % enabledGroups.length;
+
+  enabledGroups.forEach((group, index) => {
+    allocation[group.id] = base + (index < remainder ? 1 : 0);
+  });
+
+  return allocation;
+};
+
+const getResolvedGroupsByTarget = (
+  groups: SubjectGroup[],
+  blokkStudentIds: StudentIdsByBlokk,
+  groupStudentAssignments: Record<string, string>
+): Record<BlokkLabel, ResolvedGroup[]> => {
+  const byTarget: Record<BlokkLabel, SubjectGroup[]> = {
+    'Blokk 1': [],
+    'Blokk 2': [],
+    'Blokk 3': [],
+    'Blokk 4': [],
+  };
+
+  groups.forEach((group) => {
+    byTarget[group.blokk].push(group);
+  });
+
+  const resolvedByTarget: Record<BlokkLabel, ResolvedGroup[]> = {
+    'Blokk 1': [],
+    'Blokk 2': [],
+    'Blokk 3': [],
+    'Blokk 4': [],
+  };
+
+  BLOKK_LABELS.forEach((blokk) => {
+    const sorted = [...byTarget[blokk]].sort((left, right) => {
+      if (left.createdAt !== right.createdAt) {
+        return left.createdAt.localeCompare(right.createdAt);
+      }
+      return left.id.localeCompare(right.id);
+    });
+
+    const enabledGroups = sorted.filter((group) => group.enabled);
+    const allocation: Record<string, number> = {};
+    sorted.forEach((group) => {
+      allocation[group.id] = 0;
+    });
+
+    const studentIds = blokkStudentIds[blokk] || [];
+    const unassignedStudentIds: string[] = [];
+
+    studentIds.forEach((studentId) => {
+      const assignedGroupId = groupStudentAssignments[studentId];
+      if (!assignedGroupId) {
+        unassignedStudentIds.push(studentId);
+        return;
+      }
+
+      const assignedGroup = enabledGroups.find((group) => group.id === assignedGroupId);
+      if (!assignedGroup) {
+        unassignedStudentIds.push(studentId);
+        return;
+      }
+
+      allocation[assignedGroup.id] = (allocation[assignedGroup.id] || 0) + 1;
+    });
+
+    const evenAllocation = allocateCountsEvenlyAcrossGroups(unassignedStudentIds.length, enabledGroups);
+    Object.entries(evenAllocation).forEach(([groupId, count]) => {
+      allocation[groupId] = (allocation[groupId] || 0) + count;
+    });
+
+    resolvedByTarget[blokk] = sorted.map((group, index) => {
+      const count = allocation[group.id] ?? 0;
+      return {
+        ...group,
+        label: `${getBlokkNumber(blokk)}-${index + 1}`,
+        allocatedCount: count,
+        overfilled: group.enabled && count > group.max,
+      };
+    });
+  });
+
+  return resolvedByTarget;
+};
+
+const getActiveTotal = (groupsByTarget: Record<BlokkLabel, ResolvedGroup[]>): number => {
+  return BLOKK_LABELS.reduce((sum, blokk) => {
+    const activeCount = groupsByTarget[blokk]
+      .filter((group) => group.enabled)
+      .reduce((groupSum, group) => groupSum + group.allocatedCount, 0);
+    return sum + activeCount;
+  }, 0);
+};
+
+const parseSubjects = (value: string | null): string[] => {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[,;]/)
+    .map((subject) => subject.trim())
+    .filter((subject) => subject.length > 0);
+};
+
+const isSameSubject = (left: string, right: string): boolean => {
+  return left.localeCompare(right, 'nb', { sensitivity: 'base' }) === 0;
+};
+
+const getStudentId = (student: StandardField, index: number): string => {
+  return student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
 };
 
 export const SubjectTally = ({
@@ -99,7 +365,6 @@ export const SubjectTally = ({
   mergedData,
   subjectSettingsByName,
   onSaveSubjectSettingsByName,
-  onApplySubjectBlockMoves,
 }: SubjectTallyProps) => {
   const [markOverfilled, setMarkOverfilled] = useState(false);
   const [showOverfillModal, setShowOverfillModal] = useState(false);
@@ -107,12 +372,86 @@ export const SubjectTally = ({
   const [draftsBySubject, setDraftsBySubject] = useState<Record<string, SubjectDraft>>({});
   const [copiedSubject, setCopiedSubject] = useState<string | null>(null);
   const [draggedSubject, setDraggedSubject] = useState<string | null>(null);
-  const [draggedBlokk, setDraggedBlokk] = useState<BlokkLabel | null>(null);
-  const [draggedFromTarget, setDraggedFromTarget] = useState<BlokkLabel | null>(null);
-  const [draggedIsExtra, setDraggedIsExtra] = useState(false);
+  const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
 
-  const blokkLabelToNumber = (label: BlokkLabel): number => {
-    return Number.parseInt(label.replace('Blokk ', ''), 10);
+  const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
+    const blokkCounts: Record<BlokkLabel, number> = {
+      'Blokk 1': 0,
+      'Blokk 2': 0,
+      'Blokk 3': 0,
+      'Blokk 4': 0,
+    };
+
+    mergedData.forEach((student) => {
+      if (student.blokk1?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 1'] += 1;
+      if (student.blokk2?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 2'] += 1;
+      if (student.blokk3?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 3'] += 1;
+      if (student.blokk4?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 4'] += 1;
+    });
+
+    return blokkCounts;
+  };
+
+  const getStudentIdsByBlokk = (subject: string): StudentIdsByBlokk => {
+    const idsByBlokk: StudentIdsByBlokk = {
+      'Blokk 1': [],
+      'Blokk 2': [],
+      'Blokk 3': [],
+      'Blokk 4': [],
+    };
+
+    mergedData.forEach((student, index) => {
+      const studentId = getStudentId(student, index);
+
+      const subjectByBlokk: Array<{ label: BlokkLabel; value: string | null }> = [
+        { label: 'Blokk 1', value: student.blokk1 },
+        { label: 'Blokk 2', value: student.blokk2 },
+        { label: 'Blokk 3', value: student.blokk3 },
+        { label: 'Blokk 4', value: student.blokk4 },
+      ];
+
+      subjectByBlokk.forEach(({ label, value }) => {
+        const subjects = parseSubjects(value);
+        if (subjects.some((item) => isSameSubject(item, subject))) {
+          idsByBlokk[label].push(studentId);
+        }
+      });
+    });
+
+    return idsByBlokk;
+  };
+
+  const getResolvedForSubject = (subject: string, breakdown: Record<BlokkLabel, number>) => {
+    const settings = getSettingsForSubject(subjectSettingsByName, subject, breakdown);
+    const groups = settings.groups || [];
+    const studentIdsByBlokk = getStudentIdsByBlokk(subject);
+    const groupsByTarget = getResolvedGroupsByTarget(
+      groups,
+      studentIdsByBlokk,
+      settings.groupStudentAssignments || {}
+    );
+
+    return {
+      settings,
+      groups,
+      studentIdsByBlokk,
+      groupsByTarget,
+      activeTotal: getActiveTotal(groupsByTarget),
+    };
+  };
+
+  const saveSubjectGroups = (subject: string, groups: SubjectGroup[], defaultMax?: number) => {
+    const breakdown = getBlokkBreakdown(subject);
+    const current = getSettingsForSubject(subjectSettingsByName, subject, breakdown);
+
+    onSaveSubjectSettingsByName({
+      ...subjectSettingsByName,
+      [subject]: {
+        defaultMax: defaultMax ?? current.defaultMax,
+        groupStudentAssignments: { ...(current.groupStudentAssignments || {}) },
+        groups,
+      },
+    });
   };
 
   const handleCopyTotal = async (subject: string, count: number) => {
@@ -125,168 +464,109 @@ export const SubjectTally = ({
     }
   };
 
-  const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
-    const blokkCounts: Record<BlokkLabel, number> = {
-      'Blokk 1': 0,
-      'Blokk 2': 0,
-      'Blokk 3': 0,
-      'Blokk 4': 0,
-    };
+  const clearDraggedState = () => {
+    setDraggedSubject(null);
+    setDraggedGroupId(null);
+  };
 
-    mergedData.forEach((student) => {
-      if (student.blokk1?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 1']++;
-      if (student.blokk2?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 2']++;
-      if (student.blokk3?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 3']++;
-      if (student.blokk4?.split(/[,;]/).map((s) => s.trim()).includes(subject)) blokkCounts['Blokk 4']++;
+  const moveGroupToBlokk = (subject: string, groupId: string, targetBlokk: BlokkLabel) => {
+    const breakdown = getBlokkBreakdown(subject);
+    const { groups } = getResolvedForSubject(subject, breakdown);
+
+    const nextGroups = groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+
+      return {
+        ...group,
+        blokk: targetBlokk,
+      };
     });
 
-    return blokkCounts;
+    saveSubjectGroups(subject, nextGroups);
   };
 
-  const getEffectiveMax = (subject: string, blokk: BlokkLabel): number => {
-    const settings = getSettingsForSubject(subjectSettingsByName, subject);
-    const raw = settings.blokkMaxOverrides[blokk];
+  const addExtraGroupToTarget = (subject: string, target: BlokkLabel) => {
+    const breakdown = getBlokkBreakdown(subject);
+    const { settings, groups } = getResolvedForSubject(subject, breakdown);
 
-    if (typeof raw === 'number' && !Number.isNaN(raw)) {
-      return Math.max(0, raw);
+    const nextGroups = [
+      ...groups,
+      makeGroup(target, target, settings.defaultMax, true),
+    ];
+
+    saveSubjectGroups(subject, nextGroups, settings.defaultMax);
+  };
+
+  const removeDraggedGroup = (subject: string) => {
+    if (draggedSubject !== subject || !draggedGroupId) {
+      clearDraggedState();
+      return;
     }
 
-    return settings.defaultMax;
-  };
+    const breakdown = getBlokkBreakdown(subject);
+    const { groupsByTarget, groups } = getResolvedForSubject(subject, breakdown);
 
-  const isBlokkEnabled = (
-    subject: string,
-    blokk: BlokkLabel,
-    blokkBreakdown?: Record<BlokkLabel, number>
-  ): boolean => {
-    const settings = getSettingsForSubject(subjectSettingsByName, subject);
-    const explicit = settings.blokkEnabled[blokk];
-    if (typeof explicit === 'boolean') {
-      return explicit;
+    const allResolved = BLOKK_LABELS.flatMap((blokk) => groupsByTarget[blokk]);
+    const targetGroup = allResolved.find((group) => group.id === draggedGroupId);
+
+    if (!targetGroup) {
+      clearDraggedState();
+      return;
     }
 
-    const breakdown = blokkBreakdown ?? getBlokkBreakdown(subject);
-    return breakdown[blokk] > 0;
-  };
+    if (targetGroup.allocatedCount > 0) {
+      const nextGroups = groups.map((group) => {
+        if (group.id !== draggedGroupId) {
+          return group;
+        }
 
-  const getOrderedBlokker = (subject: string, blokkBreakdown: Record<BlokkLabel, number>) => {
-    const settings = getSettingsForSubject(subjectSettingsByName, subject);
-
-    const placedByTarget: Record<BlokkLabel, Array<{
-      id: string;
-      source: BlokkLabel;
-      count: number;
-      enabled: boolean;
-      hasExplicitEnabled: boolean;
-      max: number;
-      target: BlokkLabel;
-      isExtra: boolean;
-    }>> = {
-      'Blokk 1': [],
-      'Blokk 2': [],
-      'Blokk 3': [],
-      'Blokk 4': [],
-    };
-
-    BLOKK_LABELS.forEach((sourceBlokk, sourceIndex) => {
-      const targetBlokk = settings.blokkOrder[sourceIndex] ?? sourceBlokk;
-      const explicitEnabled = typeof settings.blokkEnabled[sourceBlokk] === 'boolean';
-      placedByTarget[targetBlokk].push({
-        id: `source-${sourceBlokk}`,
-        source: sourceBlokk,
-        count: blokkBreakdown[sourceBlokk],
-        enabled: isBlokkEnabled(subject, sourceBlokk, blokkBreakdown),
-        hasExplicitEnabled: explicitEnabled,
-        max: getEffectiveMax(subject, sourceBlokk),
-        target: targetBlokk,
-        isExtra: false,
+        return {
+          ...group,
+          enabled: false,
+        };
       });
-    });
 
-    BLOKK_LABELS.forEach((targetBlokk) => {
-      const extraCount = Math.max(0, Math.floor(settings.extraGroupCounts?.[targetBlokk] ?? 0));
-      for (let i = 0; i < extraCount; i++) {
-        placedByTarget[targetBlokk].push({
-          id: `extra-${targetBlokk}-${i + 1}`,
-          source: targetBlokk,
-          count: 0,
-          enabled: true,
-          hasExplicitEnabled: true,
-          max: getEffectiveMax(subject, targetBlokk),
-          target: targetBlokk,
-          isExtra: true,
-        });
-      }
-    });
-
-    return placedByTarget;
-  };
-
-  const shouldShowPlacedEntry = (entry: {
-    count: number;
-    enabled: boolean;
-    isExtra: boolean;
-    hasExplicitEnabled: boolean;
-  }) => {
-    if (entry.isExtra) {
-      return true;
+      saveSubjectGroups(subject, nextGroups);
+      clearDraggedState();
+      return;
     }
 
-    if (entry.count > 0) {
-      return true;
-    }
-
-    if (entry.enabled) {
-      return true;
-    }
-
-    // Keep explicitly user-managed empty groups visible, but hide implicit empty groups from import.
-    return entry.hasExplicitEnabled;
-  };
-
-  const getActiveTotal = (subject: string, blokkBreakdown: Record<BlokkLabel, number>): number => {
-    return BLOKK_LABELS.reduce((sum, blokk) => {
-      if (!isBlokkEnabled(subject, blokk, blokkBreakdown)) {
-        return sum;
-      }
-      return sum + blokkBreakdown[blokk];
-    }, 0);
+    const nextGroups = groups.filter((group) => group.id !== draggedGroupId);
+    saveSubjectGroups(subject, nextGroups);
+    clearDraggedState();
   };
 
   const exportTable = async () => {
     const XLSX = await loadXlsx();
-    const exportData = subjects.map((item) => {
-      const blokkBreakdown = getBlokkBreakdown(item.subject);
-      const placedByTarget = getOrderedBlokker(item.subject, blokkBreakdown);
 
-      const formatGroupCell = (entries: Array<{
-        count: number;
-        enabled: boolean;
-        isExtra: boolean;
-        hasExplicitEnabled: boolean;
-      }>) => {
-        const visibleEntries = entries.filter(shouldShowPlacedEntry);
+    const exportData = subjects.map((item) => {
+      const breakdown = getBlokkBreakdown(item.subject);
+      const { groupsByTarget, activeTotal } = getResolvedForSubject(item.subject, breakdown);
+
+      const formatBlokkCell = (entries: ResolvedGroup[]) => {
+        const visibleEntries = entries.filter(shouldShowGroup);
+
         if (visibleEntries.length === 0) {
           return '';
         }
 
-        const activeCount = visibleEntries.reduce((sum, entry) => sum + (entry.enabled ? entry.count : 0), 0);
-        const groupSuffix = visibleEntries.length > 1 ? ` (${visibleEntries.length} grp)` : '';
+        const activeCount = visibleEntries
+          .filter((entry) => entry.enabled)
+          .reduce((sum, entry) => sum + entry.allocatedCount, 0);
 
-        if (activeCount === 0) {
-          return `0${groupSuffix} (av)`;
-        }
-
-        return `${activeCount}${groupSuffix}`;
+        const labels = visibleEntries.map((entry) => entry.label).join(', ');
+        return `${activeCount} (${labels})`;
       };
 
       return {
         Fag: item.subject,
-        Gruppe1: formatGroupCell(placedByTarget['Blokk 1']),
-        Gruppe2: formatGroupCell(placedByTarget['Blokk 2']),
-        Gruppe3: formatGroupCell(placedByTarget['Blokk 3']),
-        Gruppe4: formatGroupCell(placedByTarget['Blokk 4']),
-        TotaltAktive: getActiveTotal(item.subject, blokkBreakdown),
+        Blokk1: formatBlokkCell(groupsByTarget['Blokk 1']),
+        Blokk2: formatBlokkCell(groupsByTarget['Blokk 2']),
+        Blokk3: formatBlokkCell(groupsByTarget['Blokk 3']),
+        Blokk4: formatBlokkCell(groupsByTarget['Blokk 4']),
+        TotaltAktive: activeTotal,
         TotaltOriginalt: item.count,
       };
     });
@@ -349,23 +629,10 @@ export const SubjectTally = ({
     const nextDrafts: Record<string, SubjectDraft> = {};
 
     subjects.forEach((item) => {
-      const saved = getSettingsForSubject(subjectSettingsByName, item.subject);
       const breakdown = getBlokkBreakdown(item.subject);
+      const saved = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown);
       nextDrafts[item.subject] = {
         defaultMax: String(saved.defaultMax),
-        blokkMaxOverrides: {
-          'Blokk 1': saved.blokkMaxOverrides['Blokk 1'] !== undefined ? String(saved.blokkMaxOverrides['Blokk 1']) : '',
-          'Blokk 2': saved.blokkMaxOverrides['Blokk 2'] !== undefined ? String(saved.blokkMaxOverrides['Blokk 2']) : '',
-          'Blokk 3': saved.blokkMaxOverrides['Blokk 3'] !== undefined ? String(saved.blokkMaxOverrides['Blokk 3']) : '',
-          'Blokk 4': saved.blokkMaxOverrides['Blokk 4'] !== undefined ? String(saved.blokkMaxOverrides['Blokk 4']) : '',
-        },
-        blokkEnabled: {
-          'Blokk 1': saved.blokkEnabled['Blokk 1'] ?? breakdown['Blokk 1'] > 0,
-          'Blokk 2': saved.blokkEnabled['Blokk 2'] ?? breakdown['Blokk 2'] > 0,
-          'Blokk 3': saved.blokkEnabled['Blokk 3'] ?? breakdown['Blokk 3'] > 0,
-          'Blokk 4': saved.blokkEnabled['Blokk 4'] ?? breakdown['Blokk 4'] > 0,
-        },
-        blokkOrder: [...saved.blokkOrder],
       };
     });
 
@@ -385,30 +652,7 @@ export const SubjectTally = ({
           return;
         }
         next[item.subject] = {
-          ...draft,
           defaultMax: String(safeValue),
-        };
-      });
-      return next;
-    });
-  };
-
-  const resetOverridesToDefault = () => {
-    setDraftsBySubject((prev) => {
-      const next = { ...prev };
-      subjects.forEach((item) => {
-        const draft = next[item.subject];
-        if (!draft) {
-          return;
-        }
-        next[item.subject] = {
-          ...draft,
-          blokkMaxOverrides: {
-            'Blokk 1': '',
-            'Blokk 2': '',
-            'Blokk 3': '',
-            'Blokk 4': '',
-          },
         };
       });
       return next;
@@ -424,36 +668,25 @@ export const SubjectTally = ({
         return;
       }
 
-      const current = getSettingsForSubject(subjectSettingsByName, item.subject);
-
+      const breakdown = getBlokkBreakdown(item.subject);
+      const current = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown);
       const defaultMax = sanitizeCount(draft.defaultMax);
-      const parsedOverrides: Partial<Record<BlokkLabel, number>> = {};
 
-      BLOKK_LABELS.forEach((blokk) => {
-        const raw = draft.blokkMaxOverrides[blokk];
-        if (raw === undefined || raw.trim() === '') {
-          return;
+      // Keep individual group max values intact. Only replace values equal to prior default.
+      const nextGroups = (current.groups || []).map((group) => {
+        if (group.max === current.defaultMax) {
+          return {
+            ...group,
+            max: defaultMax,
+          };
         }
-
-        const parsed = Number.parseInt(raw, 10);
-        if (Number.isNaN(parsed)) {
-          return;
-        }
-
-        parsedOverrides[blokk] = Math.max(0, parsed);
+        return group;
       });
 
       nextValues[item.subject] = {
         defaultMax,
-        blokkMaxOverrides: parsedOverrides,
-        blokkEnabled: {
-          'Blokk 1': draft.blokkEnabled['Blokk 1'],
-          'Blokk 2': draft.blokkEnabled['Blokk 2'],
-          'Blokk 3': draft.blokkEnabled['Blokk 3'],
-          'Blokk 4': draft.blokkEnabled['Blokk 4'],
-        },
-        blokkOrder: normalizeOrder(draft.blokkOrder),
-        extraGroupCounts: { ...(current.extraGroupCounts || {}) },
+        groupStudentAssignments: { ...(current.groupStudentAssignments || {}) },
+        groups: nextGroups,
       };
     });
 
@@ -461,162 +694,22 @@ export const SubjectTally = ({
     setShowOverfillModal(false);
   };
 
-  const placeBlokkForSubject = (subject: string, source: BlokkLabel, target: BlokkLabel) => {
-    const current = getSettingsForSubject(subjectSettingsByName, subject);
-    const sourceIndex = BLOKK_LABELS.indexOf(source);
-    if (sourceIndex < 0) {
-      return;
-    }
-
-    const placement = normalizeOrder(current.blokkOrder);
-    if (placement[sourceIndex] === target) {
-      return;
-    }
-
-    onApplySubjectBlockMoves(subject, [
-      {
-        type: 'move',
-        fromBlokk: blokkLabelToNumber(source),
-        toBlokk: blokkLabelToNumber(target),
-        reason: `Flyttet ${subject} fra ${source} til ${target}`,
-      },
-    ]);
-
-    placement[sourceIndex] = target;
-
-    onSaveSubjectSettingsByName({
-      ...subjectSettingsByName,
-      [subject]: {
-        ...current,
-        blokkOrder: placement,
-      },
-    });
-  };
-
-  const swapPlacedBlokkerForSubject = (subject: string, source: BlokkLabel, targetSource: BlokkLabel) => {
-    if (source === targetSource) {
-      return;
-    }
-
-    const current = getSettingsForSubject(subjectSettingsByName, subject);
-    const sourceIndex = BLOKK_LABELS.indexOf(source);
-    const targetIndex = BLOKK_LABELS.indexOf(targetSource);
-
-    if (sourceIndex < 0 || targetIndex < 0) {
-      return;
-    }
-
-    const placement = normalizeOrder(current.blokkOrder);
-    const sourceTarget = placement[sourceIndex];
-    const targetTarget = placement[targetIndex];
-
-    onApplySubjectBlockMoves(subject, [{
-      type: 'swap',
-      blokkA: blokkLabelToNumber(source),
-      blokkB: blokkLabelToNumber(targetSource),
-      reason: `Byttet ${subject}: ${source} <-> ${targetSource}`,
-    }]);
-
-    placement[sourceIndex] = targetTarget;
-    placement[targetIndex] = sourceTarget;
-
-    onSaveSubjectSettingsByName({
-      ...subjectSettingsByName,
-      [subject]: {
-        ...current,
-        blokkOrder: placement,
-      },
-    });
-  };
-
-  const addExtraGroupToTarget = (subject: string, target: BlokkLabel) => {
-    const current = getSettingsForSubject(subjectSettingsByName, subject);
-    const placement = normalizeOrder(current.blokkOrder);
-    const breakdown = getBlokkBreakdown(subject);
-
-    const inactiveEmptySource = BLOKK_LABELS.find((sourceBlokk, index) => {
-      const placedTarget = placement[index] ?? sourceBlokk;
-      const isInTarget = placedTarget === target;
-      const isEmpty = breakdown[sourceBlokk] === 0;
-      const isInactive = !isBlokkEnabled(subject, sourceBlokk, breakdown);
-      return isInTarget && isEmpty && isInactive;
-    });
-
-    if (inactiveEmptySource) {
-      onSaveSubjectSettingsByName({
-        ...subjectSettingsByName,
-        [subject]: {
-          ...current,
-          blokkEnabled: {
-            ...current.blokkEnabled,
-            [inactiveEmptySource]: true,
-          },
-        },
+  const subjectRows = useMemo(() => {
+    return subjects.map((item) => {
+      const breakdown = getBlokkBreakdown(item.subject);
+      const resolved = getResolvedForSubject(item.subject, breakdown);
+      const overfilled = BLOKK_LABELS.some((blokk) => {
+        return resolved.groupsByTarget[blokk].some((group) => group.overfilled);
       });
-      return;
-    }
 
-    const currentCount = Math.max(0, Math.floor(current.extraGroupCounts?.[target] ?? 0));
-    const nextExtraGroupCounts: Partial<Record<BlokkLabel, number>> = {
-      ...(current.extraGroupCounts || {}),
-      [target]: currentCount + 1,
-    };
-
-    onSaveSubjectSettingsByName({
-      ...subjectSettingsByName,
-      [subject]: {
-        ...current,
-        extraGroupCounts: nextExtraGroupCounts,
-      },
+      return {
+        item,
+        breakdown,
+        ...resolved,
+        overfilled,
+      };
     });
-  };
-
-  const clearDraggedState = () => {
-    setDraggedSubject(null);
-    setDraggedBlokk(null);
-    setDraggedFromTarget(null);
-    setDraggedIsExtra(false);
-  };
-
-  const removeDraggedGroup = (subject: string) => {
-    if (draggedSubject !== subject || !draggedBlokk) {
-      clearDraggedState();
-      return;
-    }
-
-    const current = getSettingsForSubject(subjectSettingsByName, subject);
-
-    if (draggedIsExtra) {
-      const target = draggedFromTarget ?? draggedBlokk;
-      const currentCount = Math.max(0, Math.floor(current.extraGroupCounts?.[target] ?? 0));
-      if (currentCount > 0) {
-        onSaveSubjectSettingsByName({
-          ...subjectSettingsByName,
-          [subject]: {
-            ...current,
-            extraGroupCounts: {
-              ...(current.extraGroupCounts || {}),
-              [target]: currentCount - 1,
-            },
-          },
-        });
-      }
-      clearDraggedState();
-      return;
-    }
-
-    onSaveSubjectSettingsByName({
-      ...subjectSettingsByName,
-      [subject]: {
-        ...current,
-        blokkEnabled: {
-          ...current.blokkEnabled,
-          [draggedBlokk]: false,
-        },
-      },
-    });
-    clearDraggedState();
-  };
+  }, [subjects, mergedData, subjectSettingsByName]);
 
   if (subjects.length === 0) {
     return <div className={styles.empty}>Ingen fag funnet</div>;
@@ -651,107 +744,67 @@ export const SubjectTally = ({
         <thead>
           <tr>
             <th>Fag</th>
-            <th>Gruppe 1</th>
-            <th>Gruppe 2</th>
-            <th>Gruppe 3</th>
-            <th>Gruppe 4</th>
+            <th>Blokk 1</th>
+            <th>Blokk 2</th>
+            <th>Blokk 3</th>
+            <th>Blokk 4</th>
             <th>Totalt</th>
             <th>Handlinger</th>
           </tr>
         </thead>
         <tbody>
-          {subjects.map((item) => {
-            const blokkBreakdown = getBlokkBreakdown(item.subject);
-            const placedByTarget = getOrderedBlokker(item.subject, blokkBreakdown);
-            const overfilledByBlokk = BLOKK_LABELS.reduce((acc, blokk) => {
-              const enabled = isBlokkEnabled(item.subject, blokk);
-              const max = getEffectiveMax(item.subject, blokk);
-              return {
-                ...acc,
-                [blokk]: enabled && blokkBreakdown[blokk] > max,
-              };
-            }, {} as Record<BlokkLabel, boolean>);
-            const subjectOver = BLOKK_LABELS.some((blokk) => overfilledByBlokk[blokk]);
-            const activeTotal = getActiveTotal(item.subject, blokkBreakdown);
-
+          {subjectRows.map((row) => {
             return (
-              <tr key={item.subject} className={styles.subjectRow}>
-                <td className={`${styles.subjectNameCell} ${markOverfilled && subjectOver ? styles.overfilledSubject : ''}`.trim()}>{item.subject}</td>
+              <tr key={row.item.subject} className={styles.subjectRow}>
+                <td className={`${styles.subjectNameCell} ${markOverfilled && row.overfilled ? styles.overfilledSubject : ''}`.trim()}>{row.item.subject}</td>
                 {BLOKK_LABELS.map((targetBlokk) => {
-                  const entries = placedByTarget[targetBlokk];
-                  const visibleEntries = entries.filter(shouldShowPlacedEntry);
+                  const entries = row.groupsByTarget[targetBlokk].filter(shouldShowGroup);
+                  const blokkStudents = entries
+                    .filter((entry) => entry.enabled)
+                    .reduce((sum, entry) => sum + entry.allocatedCount, 0);
+                  const blokkSpaces = entries
+                    .filter((entry) => entry.enabled)
+                    .reduce((sum, entry) => sum + entry.max, 0);
 
                   return (
                     <td
-                      key={`${item.subject}-${targetBlokk}`}
+                      key={`${row.item.subject}-${targetBlokk}`}
+                      title={`${targetBlokk} (${blokkStudents} / ${blokkSpaces})`}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={() => {
-                        if (draggedSubject === item.subject && draggedBlokk) {
-                          if (draggedIsExtra) {
-                            clearDraggedState();
-                            return;
-                          }
-                          placeBlokkForSubject(item.subject, draggedBlokk, targetBlokk);
+                        if (draggedSubject === row.item.subject && draggedGroupId) {
+                          moveGroupToBlokk(row.item.subject, draggedGroupId, targetBlokk);
                         }
                         clearDraggedState();
                       }}
                     >
                       <div className={styles.groupStack}>
-                        {visibleEntries.map((entry) => {
-                          const overfilled = entry.enabled && entry.count > entry.max;
-
+                        {entries.map((entry) => {
                           return (
-                          <div
-                            key={`${item.subject}-${targetBlokk}-${entry.id}`}
-                            className={`${styles.groupCard} ${entry.enabled ? styles.groupCardActive : styles.groupCardInactive} ${overfilled ? styles.groupCardOverfilled : ''}`.trim()}
-                            draggable={true}
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              if (!entry.isExtra && draggedSubject === item.subject && draggedBlokk) {
-                                swapPlacedBlokkerForSubject(item.subject, draggedBlokk, entry.source);
-                              }
-                              clearDraggedState();
-                            }}
-                            onDragStart={(event) => {
-                              event.dataTransfer.effectAllowed = 'move';
-                              event.dataTransfer.setData('text/plain', `${item.subject}:${entry.id}`);
-                              setDraggedSubject(item.subject);
-                              setDraggedBlokk(entry.source);
-                              setDraggedFromTarget(targetBlokk);
-                              setDraggedIsExtra(entry.isExtra);
-                            }}
-                            onDragEnd={clearDraggedState}
-                            title={entry.isExtra
-                              ? `${entry.target} ekstra gruppe`
-                              : `${entry.source} plassert i ${entry.target} (${entry.enabled ? 'aktiv' : 'inaktiv'}) - dra for å plassere i en annen blokk`}
-                          >
-                            <span className={styles.groupCount}>{entry.count}</span>
-                            <span className={styles.groupPlacementLabel}>{entry.isExtra ? 'Ny' : entry.source.replace('Blokk ', 'B')}</span>
-                          </div>
+                            <div
+                              key={`${row.item.subject}-${targetBlokk}-${entry.id}`}
+                              className={`${styles.groupCard} ${entry.enabled ? styles.groupCardActive : styles.groupCardInactive} ${entry.overfilled ? styles.groupCardOverfilled : ''}`.trim()}
+                              draggable={true}
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = 'move';
+                                event.dataTransfer.setData('text/plain', `${row.item.subject}:${entry.id}`);
+                                setDraggedSubject(row.item.subject);
+                                setDraggedGroupId(entry.id);
+                              }}
+                              onDragEnd={clearDraggedState}
+                              title={`${entry.label} (${entry.allocatedCount} / ${entry.max})`}
+                            >
+                              <span className={styles.groupCount}>{entry.allocatedCount}</span>
+                            </div>
                           );
                         })}
-                        {visibleEntries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
+                        {entries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
                         <button
                           type="button"
                           className={styles.groupAddButton}
                           onClick={(event) => {
                             event.stopPropagation();
-                            addExtraGroupToTarget(item.subject, targetBlokk);
-                          }}
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (draggedSubject === item.subject && draggedBlokk) {
-                              if (draggedIsExtra) {
-                                clearDraggedState();
-                                return;
-                              }
-                              placeBlokkForSubject(item.subject, draggedBlokk, targetBlokk);
-                            }
-                            clearDraggedState();
+                            addExtraGroupToTarget(row.item.subject, targetBlokk);
                           }}
                           title={`Legg til ny gruppe i ${targetBlokk}`}
                           aria-label={`Legg til ny gruppe i ${targetBlokk}`}
@@ -763,17 +816,17 @@ export const SubjectTally = ({
                   );
                 })}
                 <td
-                  className={`${styles.totalCell} ${markOverfilled && subjectOver ? styles.totalCellOverfilled : ''}`.trim()}
-                  onDoubleClick={() => handleCopyTotal(item.subject, activeTotal)}
-                  title="Dobbeltklikk for å kopiere"
+                  className={`${styles.totalCell} ${markOverfilled && row.overfilled ? styles.totalCellOverfilled : ''}`.trim()}
+                  onDoubleClick={() => handleCopyTotal(row.item.subject, row.activeTotal)}
+                  title="Dobbeltklikk for a kopiere"
                   style={{
                     cursor: 'pointer',
                     userSelect: 'none',
-                    backgroundColor: copiedSubject === item.subject ? '#4CAF50' : undefined,
+                    backgroundColor: copiedSubject === row.item.subject ? '#4CAF50' : undefined,
                     transition: 'background-color 0.5s ease-out',
                   }}
                 >
-                  {activeTotal}
+                  {row.activeTotal}
                 </td>
                 <td>
                   <div
@@ -781,11 +834,11 @@ export const SubjectTally = ({
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.preventDefault();
-                      removeDraggedGroup(item.subject);
+                      removeDraggedGroup(row.item.subject);
                     }}
-                    title="Dra en gruppe hit for å fjerne"
+                    title="Dra en gruppe hit for a fjerne"
                   >
-                    🗑
+                    X
                   </div>
                 </td>
               </tr>
@@ -827,10 +880,7 @@ export const SubjectTally = ({
                 className={styles.maxInput}
               />
               <button type="button" className={styles.modalSecondaryBtn} onClick={applyMassUpdate}>
-                Bruk på alle
-              </button>
-              <button type="button" className={styles.modalSecondaryBtn} onClick={resetOverridesToDefault}>
-                Nullstill til standard
+                Bruk pa alle
               </button>
             </div>
 
@@ -840,10 +890,6 @@ export const SubjectTally = ({
                   <tr>
                     <th>Fag</th>
                     <th>Standard maks</th>
-                    <th>B1</th>
-                    <th>B2</th>
-                    <th>B3</th>
-                    <th>B4</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -867,7 +913,6 @@ export const SubjectTally = ({
                               setDraftsBySubject((prev) => ({
                                 ...prev,
                                 [item.subject]: {
-                                  ...draft,
                                   defaultMax: value,
                                 },
                               }));
@@ -875,34 +920,6 @@ export const SubjectTally = ({
                             className={styles.maxInput}
                           />
                         </td>
-                        {BLOKK_LABELS.map((blokk) => {
-                          const sourceBlokk = blokk;
-
-                          return (
-                          <td key={`${item.subject}-${blokk}`}>
-                            <input
-                              type="number"
-                              min="0"
-                              value={draft.blokkMaxOverrides[sourceBlokk] ?? ''}
-                              placeholder={draft.defaultMax}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setDraftsBySubject((prev) => ({
-                                  ...prev,
-                                  [item.subject]: {
-                                    ...draft,
-                                    blokkMaxOverrides: {
-                                      ...draft.blokkMaxOverrides,
-                                      [sourceBlokk]: value,
-                                    },
-                                  },
-                                }));
-                              }}
-                              className={styles.maxInput}
-                            />
-                          </td>
-                          );
-                        })}
                       </tr>
                     );
                   })}
