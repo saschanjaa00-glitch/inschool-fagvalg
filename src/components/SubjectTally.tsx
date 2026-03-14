@@ -15,6 +15,7 @@ interface SubjectTallyProps {
       | { type: 'swap'; blokkA: number; blokkB: number; reason: string }
     >
   ) => void;
+  onRemoveStudentsFromSubject: (subject: string, studentIds: string[], reason: string) => void;
 }
 
 interface MathOptionCount {
@@ -53,7 +54,15 @@ interface SubjectDraft {
 interface ResolvedGroup extends SubjectGroup {
   label: string;
   allocatedCount: number;
+  allocatedStudentIds: string[];
   overfilled: boolean;
+}
+
+interface DeleteGroupConfirmState {
+  subject: string;
+  groupId: string;
+  blokk: BlokkLabel;
+  studentIds: string[];
 }
 
 type StudentIdsByBlokk = Record<BlokkLabel, string[]>;
@@ -235,28 +244,6 @@ const shouldShowGroup = (group: ResolvedGroup): boolean => {
   return group.allocatedCount > 0 || group.enabled;
 };
 
-const allocateCountsEvenlyAcrossGroups = (totalCount: number, groups: SubjectGroup[]): Record<string, number> => {
-  const allocation: Record<string, number> = {};
-  groups.forEach((group) => {
-    allocation[group.id] = 0;
-  });
-
-  const enabledGroups = groups.filter((group) => group.enabled);
-  if (enabledGroups.length === 0) {
-    return allocation;
-  }
-
-  const safeTotal = Math.max(0, totalCount);
-  const base = Math.floor(safeTotal / enabledGroups.length);
-  const remainder = safeTotal % enabledGroups.length;
-
-  enabledGroups.forEach((group, index) => {
-    allocation[group.id] = base + (index < remainder ? 1 : 0);
-  });
-
-  return allocation;
-};
-
 const getResolvedGroupsByTarget = (
   groups: SubjectGroup[],
   blokkStudentIds: StudentIdsByBlokk,
@@ -290,8 +277,10 @@ const getResolvedGroupsByTarget = (
 
     const enabledGroups = sorted.filter((group) => group.enabled);
     const allocation: Record<string, number> = {};
+    const studentIdsByGroupId: Record<string, string[]> = {};
     sorted.forEach((group) => {
       allocation[group.id] = 0;
+      studentIdsByGroupId[group.id] = [];
     });
 
     const studentIds = blokkStudentIds[blokk] || [];
@@ -311,11 +300,17 @@ const getResolvedGroupsByTarget = (
       }
 
       allocation[assignedGroup.id] = (allocation[assignedGroup.id] || 0) + 1;
+      studentIdsByGroupId[assignedGroup.id].push(studentId);
     });
 
-    const evenAllocation = allocateCountsEvenlyAcrossGroups(unassignedStudentIds.length, enabledGroups);
-    Object.entries(evenAllocation).forEach(([groupId, count]) => {
-      allocation[groupId] = (allocation[groupId] || 0) + count;
+    unassignedStudentIds.forEach((studentId, index) => {
+      if (enabledGroups.length === 0) {
+        return;
+      }
+
+      const targetGroup = enabledGroups[index % enabledGroups.length];
+      allocation[targetGroup.id] = (allocation[targetGroup.id] || 0) + 1;
+      studentIdsByGroupId[targetGroup.id].push(studentId);
     });
 
     resolvedByTarget[blokk] = sorted.map((group, index) => {
@@ -324,6 +319,7 @@ const getResolvedGroupsByTarget = (
         ...group,
         label: `${getBlokkNumber(blokk)}-${index + 1}`,
         allocatedCount: count,
+        allocatedStudentIds: studentIdsByGroupId[group.id] || [],
         overfilled: group.enabled && count > group.max,
       };
     });
@@ -365,6 +361,7 @@ export const SubjectTally = ({
   mergedData,
   subjectSettingsByName,
   onSaveSubjectSettingsByName,
+  onRemoveStudentsFromSubject,
 }: SubjectTallyProps) => {
   const [markOverfilled, setMarkOverfilled] = useState(false);
   const [showOverfillModal, setShowOverfillModal] = useState(false);
@@ -374,6 +371,8 @@ export const SubjectTally = ({
   const [draggedSubject, setDraggedSubject] = useState<string | null>(null);
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [activeTrashSubject, setActiveTrashSubject] = useState<string | null>(null);
+  const [deleteGroupConfirmState, setDeleteGroupConfirmState] = useState<DeleteGroupConfirmState | null>(null);
+  const [isDeleteGroupConfirmArmed, setIsDeleteGroupConfirmArmed] = useState(false);
 
   const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
     const blokkCounts: Record<BlokkLabel, number> = {
@@ -471,6 +470,11 @@ export const SubjectTally = ({
     setActiveTrashSubject(null);
   };
 
+  const closeDeleteGroupConfirm = () => {
+    setDeleteGroupConfirmState(null);
+    setIsDeleteGroupConfirmArmed(false);
+  };
+
   const moveGroupToBlokk = (subject: string, groupId: string, targetBlokk: BlokkLabel) => {
     const breakdown = getBlokkBreakdown(subject);
     const { groups } = getResolvedForSubject(subject, breakdown);
@@ -518,6 +522,22 @@ export const SubjectTally = ({
       return;
     }
 
+    const enabledGroupsInSameBlokk = groupsByTarget[targetGroup.blokk].filter((group) => group.enabled);
+    const isLastEnabledGroupInBlokk = enabledGroupsInSameBlokk.length === 1
+      && enabledGroupsInSameBlokk[0].id === targetGroup.id;
+
+    if (targetGroup.allocatedCount > 0 && isLastEnabledGroupInBlokk) {
+      setDeleteGroupConfirmState({
+        subject,
+        groupId: targetGroup.id,
+        blokk: targetGroup.blokk,
+        studentIds: targetGroup.allocatedStudentIds,
+      });
+      setIsDeleteGroupConfirmArmed(false);
+      clearDraggedState();
+      return;
+    }
+
     if (targetGroup.allocatedCount > 0) {
       const nextGroups = groups.map((group) => {
         if (group.id !== draggedGroupId) {
@@ -538,6 +558,39 @@ export const SubjectTally = ({
     const nextGroups = groups.filter((group) => group.id !== draggedGroupId);
     saveSubjectGroups(subject, nextGroups);
     clearDraggedState();
+  };
+
+  const handleConfirmDeleteGroup = () => {
+    if (!deleteGroupConfirmState) {
+      return;
+    }
+
+    const { subject, groupId, blokk, studentIds } = deleteGroupConfirmState;
+    const breakdown = getBlokkBreakdown(subject);
+    const { settings, groups } = getResolvedForSubject(subject, breakdown);
+    const nextGroups = groups.filter((group) => group.id !== groupId);
+    const nextAssignments = Object.fromEntries(
+      Object.entries(settings.groupStudentAssignments || {}).filter(([studentId, assignedGroupId]) => {
+        return assignedGroupId !== groupId && !studentIds.includes(studentId);
+      })
+    );
+
+    onSaveSubjectSettingsByName({
+      ...subjectSettingsByName,
+      [subject]: {
+        ...settings,
+        groups: nextGroups,
+        groupStudentAssignments: nextAssignments,
+      },
+    });
+
+    onRemoveStudentsFromSubject(
+      subject,
+      studentIds,
+      `Fagoversikt: slettet siste gruppe i ${blokk}, fjernet ${subject} fra faget`
+    );
+
+    closeDeleteGroupConfirm();
   };
 
   const exportTable = async () => {
@@ -971,6 +1024,66 @@ export const SubjectTally = ({
               </button>
               <button type="button" className={styles.modalPrimaryBtn} onClick={saveOverfillSettings}>
                 Lagre
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteGroupConfirmState && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            if (isDeleteGroupConfirmArmed) {
+              setIsDeleteGroupConfirmArmed(false);
+              return;
+            }
+
+            closeDeleteGroupConfirm();
+          }}
+        >
+          <div
+            className={styles.confirmModal}
+            onClick={(event) => {
+              event.stopPropagation();
+
+              if (isDeleteGroupConfirmArmed) {
+                setIsDeleteGroupConfirmArmed(false);
+              }
+            }}
+          >
+            <h4>Slett gruppe</h4>
+            <p className={styles.confirmMessage}>
+              Vil du slette denne gruppen? Elever som er tildelt gruppen vil fjernes fra faget.
+            </p>
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={`${styles.modalSecondaryBtn} ${styles.confirmActionBtn}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeDeleteGroupConfirm();
+                }}
+              >
+                Nei
+              </button>
+              <button
+                type="button"
+                className={`${styles.modalPrimaryBtn} ${styles.confirmActionBtn} ${
+                  isDeleteGroupConfirmArmed ? styles.modalConfirmBtn : ''
+                }`}
+                onClick={(event) => {
+                  event.stopPropagation();
+
+                  if (isDeleteGroupConfirmArmed) {
+                    handleConfirmDeleteGroup();
+                    return;
+                  }
+
+                  setIsDeleteGroupConfirmArmed(true);
+                }}
+              >
+                {isDeleteGroupConfirmArmed ? 'Bekreft' : 'Ja'}
               </button>
             </div>
           </div>

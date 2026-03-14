@@ -10,6 +10,7 @@ import {
   moveSubjectAssignmentsBetweenBlokker,
   swapSubjectAssignmentsBetweenBlokker,
   exportToExcelDetailed,
+  removeSubjectAssignmentsForStudents,
 } from './utils/excelUtils';
 import './App.css';
 import { FileUploader } from './components/FileUploader';
@@ -52,7 +53,7 @@ function App() {
   const [blokkCount, setBlokkCount] = useState(4);
   
   const [columnMapperExpanded, setColumnMapperExpanded] = useState(false);
-  const [activeDataTab, setActiveDataTab] = useState<'subjects' | 'students' | 'elever'>('subjects');
+  const [activeDataTab, setActiveDataTab] = useState<'import' | 'subjects' | 'students' | 'elever'>('import');
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningBlokkCollisionExpanded, setWarningBlokkCollisionExpanded] = useState(false);
   const [warningFewSubjectsExpanded, setWarningFewSubjectsExpanded] = useState(false);
@@ -214,6 +215,7 @@ function App() {
     setMergedData(merged);
     setSubjects(tallySubjects(merged));
     setStudentAssignmentChanges([]);
+    setActiveDataTab('subjects');
   };
 
   const handleReset = () => {
@@ -309,6 +311,21 @@ function App() {
     setMergedData(updatedData);
     setSubjects(tallySubjects(updatedData));
     setStudentAssignmentChanges((prev) => [...prev, ...changes]);
+  };
+
+  const handleRemoveStudentsFromSubject = (
+    subject: string,
+    studentIds: string[],
+    reason: string
+  ) => {
+    const result = removeSubjectAssignmentsForStudents(mergedData, subject, studentIds, reason);
+    if (result.changes.length === 0) {
+      return;
+    }
+
+    setMergedData(result.updatedData);
+    setSubjects(tallySubjects(result.updatedData));
+    setStudentAssignmentChanges((prev) => [...prev, ...result.changes]);
   };
 
   const getWarningStudentId = (student: StandardField, indexHint?: number): string => {
@@ -602,6 +619,8 @@ function App() {
     setActiveDataTab('elever');
   };
 
+  const hasDataTabs = parsedFiles.length > 0 || mergedData.length > 0;
+
   return (
     <div className="app">
       <main className="main">
@@ -611,83 +630,9 @@ function App() {
             <p>Slå sammen fagvalg fra flere programområder og trinn</p>
           </header>
 
-          <FileUploader onFilesAdded={handleFilesAdded} />
-
-        {parsedFiles.length > 0 && (
+        {hasDataTabs && (
           <>
-            <div className="uploaded-files">
-              <h3 className="uploaded-files-title">Opplastede filer ({parsedFiles.length})</h3>
-              <ul>
-                {parsedFiles.map((file) => (
-                  <li key={file.id}>
-                    <span>{file.filename}</span>
-                    <button
-                      onClick={() => handleRemoveFile(file.id)}
-                      className="remove-btn"
-                    >
-                      Fjern
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="column-mapper-section">
-              <h3 
-                className="collapsible-header" 
-                onClick={() => setColumnMapperExpanded(!columnMapperExpanded)}
-              >
-                <span className="chevron">{columnMapperExpanded ? '▼' : '▶'}</span>
-                Oppsett
-              </h3>
-              {columnMapperExpanded && (
-                <ColumnMapper 
-                  files={parsedFiles} 
-                  onMappingChange={handleMappingChange}
-                  currentMappings={mappings}
-                  blokkCount={blokkCount}
-                  onBlokkCountChange={setBlokkCount}
-                />
-              )}
-            </div>
-
-            <div className="action-buttons">
-              <button onClick={handleMerge} className="merge-btn">
-                Slå sammen data
-              </button>
-              <button onClick={handleClearStoredData} className="clear-storage-btn">
-                Tøm data
-              </button>
-              <button
-                onClick={handleExport}
-                className="export-btn"
-                disabled={mergedData.length === 0}
-                title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter sammenslått data'}
-              >
-                Eksporter til Novaschem
-              </button>
-              <button
-                onClick={handleExportDetailed}
-                className="export-btn"
-                disabled={mergedData.length === 0}
-                title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter med separate blokk-kolonner og fullstendige fagnavn'}
-              >
-                Eksporter til Excel (full)
-              </button>
-              <button
-                onClick={handleExportText}
-                className="export-btn"
-                disabled={mergedData.length === 0}
-                title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter som tabulatorseparert tekstfil med fagnummer'}
-              >
-                Eksporter til TXT
-              </button>
-            </div>
-          </>
-        )}
-
-        {mergedData.length > 0 && (
-          <>
+              {mergedData.length > 0 && (
               <div className={`warning-box ${hasActiveWarnings ? '' : 'warning-box-clear'}`.trim()}>
                 <h3 
                   className={`collapsible-header warning-header ${hasActiveWarnings ? '' : 'warning-header-clear'}`.trim()}
@@ -895,10 +840,20 @@ function App() {
                   </div>
                 )}
               </div>
+              )}
             
             <div className="control-row-group">
               <div className="control-row-label">Visning</div>
               <div className="data-tabs" role="tablist" aria-label="Data visning">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeDataTab === 'import'}
+                  className={`data-tab ${activeDataTab === 'import' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab('import')}
+                >
+                  Last inn data
+                </button>
                 <button
                   type="button"
                   role="tab"
@@ -930,13 +885,91 @@ function App() {
             </div>
 
             <div className="data-tab-panel">
-              {activeDataTab === 'subjects' ? (
+              {activeDataTab === 'import' ? (
+                <>
+                  <FileUploader onFilesAdded={handleFilesAdded} />
+
+                  {parsedFiles.length > 0 && (
+                    <>
+                      <div className="uploaded-files">
+                        <h3 className="uploaded-files-title">Opplastede filer ({parsedFiles.length})</h3>
+                        <ul>
+                          {parsedFiles.map((file) => (
+                            <li key={file.id}>
+                              <span>{file.filename}</span>
+                              <button
+                                onClick={() => handleRemoveFile(file.id)}
+                                className="remove-btn"
+                              >
+                                Fjern
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="column-mapper-section">
+                        <h3
+                          className="collapsible-header"
+                          onClick={() => setColumnMapperExpanded(!columnMapperExpanded)}
+                        >
+                          <span className="chevron">{columnMapperExpanded ? '▼' : '▶'}</span>
+                          Oppsett
+                        </h3>
+                        {columnMapperExpanded && (
+                          <ColumnMapper
+                            files={parsedFiles}
+                            onMappingChange={handleMappingChange}
+                            currentMappings={mappings}
+                            blokkCount={blokkCount}
+                            onBlokkCountChange={setBlokkCount}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="action-buttons">
+                    <button onClick={handleMerge} className="merge-btn" disabled={parsedFiles.length === 0}>
+                      Slå sammen data
+                    </button>
+                    <button onClick={handleClearStoredData} className="clear-storage-btn">
+                      Tøm data
+                    </button>
+                    <button
+                      onClick={handleExport}
+                      className="export-btn"
+                      disabled={mergedData.length === 0}
+                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter sammenslått data'}
+                    >
+                      Eksporter til Novaschem
+                    </button>
+                    <button
+                      onClick={handleExportDetailed}
+                      className="export-btn"
+                      disabled={mergedData.length === 0}
+                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter med separate blokk-kolonner og fullstendige fagnavn'}
+                    >
+                      Eksporter til Excel (full)
+                    </button>
+                    <button
+                      onClick={handleExportText}
+                      className="export-btn"
+                      disabled={mergedData.length === 0}
+                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter som tabulatorseparert tekstfil med fagnummer'}
+                    >
+                      Eksporter til TXT
+                    </button>
+                  </div>
+                </>
+              ) : activeDataTab === 'subjects' ? (
                 <SubjectTally
                   subjects={subjects}
                   mergedData={mergedData}
                   subjectSettingsByName={subjectSettingsByName}
                   onSaveSubjectSettingsByName={setSubjectSettingsByName}
                   onApplySubjectBlockMoves={handleApplySubjectBlockMoves}
+                  onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
                 />
               ) : activeDataTab === 'students' ? (
                 <MergedDataView
@@ -964,6 +997,12 @@ function App() {
               )}
             </div>
           </>
+        )}
+
+        {!hasDataTabs && (
+          <div className="data-tab-panel">
+            <FileUploader onFilesAdded={handleFilesAdded} />
+          </div>
         )}
         </div>
       </main>

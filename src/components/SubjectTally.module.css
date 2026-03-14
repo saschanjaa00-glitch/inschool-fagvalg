@@ -625,3 +625,43 @@
 .modalPrimaryBtn:hover {
   background: #000;
 }
+
+.confirmActionBtn {
+  min-width: 88px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modalConfirmBtn {
+  background: #2f9e44;
+}
+
+.modalConfirmBtn:hover {
+  background: #237a33;
+}
+
+.confirmModal {
+  width: min(420px, 92vw);
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.confirmModal h4 {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 14px;
+  color: #222;
+}
+
+.confirmMessage {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #333;
+}
