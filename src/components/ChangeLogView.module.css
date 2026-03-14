@@ -4,10 +4,33 @@
   gap: 10px;
 }
 
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .modeToggle {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.exportBtn {
+  border: 1px solid #c3c9ff;
+  border-radius: 6px;
+  background: #eef1ff;
+  color: #2b3578;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.exportBtn:hover {
+  background: #e3e8ff;
 }
 
 .modeBtn {

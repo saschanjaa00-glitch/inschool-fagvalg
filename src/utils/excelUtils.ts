@@ -381,8 +381,10 @@ const formatSubjects = (subjects: string[]): string | null => {
   return subjects.join(', ');
 };
 
-const getBlokkField = (blokkNumber: number): keyof StandardField => {
-  return `blokk${blokkNumber}` as keyof StandardField;
+type BlokkField = `blokk${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+
+const getBlokkField = (blokkNumber: number): BlokkField => {
+  return `blokk${blokkNumber}` as BlokkField;
 };
 
 export const moveSubjectAssignmentsBetweenBlokker = (
