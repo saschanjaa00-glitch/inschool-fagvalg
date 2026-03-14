@@ -591,10 +591,6 @@ export const EleverView = ({
     }
 
     const comment = (warningIgnoreDraftByType[type] || '').trim();
-    if (!comment) {
-      return;
-    }
-
     onSaveWarningIgnore(selectedStudentEntry.studentId, type, comment);
     setWarningIgnoreDraftByType((prev) => ({
       ...prev,
@@ -956,7 +952,7 @@ export const EleverView = ({
                       <div className={styles.warningIgnoreTitle}>{warning.title}</div>
                       {warning.ignored ? (
                         <div className={styles.warningIgnoreControls}>
-                          <span className={styles.warningIgnoredLabel}>Ignorert: {warning.ignored.comment}</span>
+                          <span className={styles.warningIgnoredLabel}>Ignorert: {warning.ignored.comment || 'Ingen kommentar'}</span>
                           <button
                             type="button"
                             className={styles.warningIgnoreButton}
@@ -971,7 +967,7 @@ export const EleverView = ({
                             type="text"
                             maxLength={140}
                             className={styles.warningIgnoreInput}
-                            placeholder="Kort kommentar for ignorering"
+                            placeholder="Kommentar (valgfritt)"
                             value={warningIgnoreDraftByType[warning.type] || ''}
                             onChange={(event) => {
                               const value = event.target.value;
@@ -984,7 +980,6 @@ export const EleverView = ({
                           <button
                             type="button"
                             className={styles.warningIgnoreButton}
-                            disabled={!(warningIgnoreDraftByType[warning.type] || '').trim()}
                             onClick={() => handleSaveWarningIgnore(warning.type)}
                           >
                             Ignorer

@@ -301,8 +301,8 @@
 }
 
 .warning-ignored-item {
-  border-color: #e7c873;
-  background: #fffdf4;
+  border-color: #79b88a;
+  background: #eefaf1;
 }
 
 .warning-ignore-badge {
@@ -310,9 +310,9 @@
   align-items: center;
   padding: 1px 6px;
   border-radius: 999px;
-  border: 1px solid #d7ba62;
-  background: #fff6d8;
-  color: #7c6200;
+  border: 1px solid #77b787;
+  background: #dff3e5;
+  color: #1f6a34;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -364,7 +364,64 @@
 
 .warning-ignore-comment {
   font-size: 12px;
-  color: #6f5800;
+  color: #2f6b3e;
+}
+
+.warning-box-clear {
+  background: #edf9f0;
+  border-color: #6cab7e;
+}
+
+.warning-header-clear {
+  color: #2b7a43;
+}
+
+.warning-header-clear:hover {
+  color: #1f6436;
+}
+
+.warning-box-clear .warning-subtitle {
+  color: #2b7a43;
+}
+
+.warning-box-clear .warning-content li {
+  border-color: #8fc49d;
+  background: #f7fdf9;
+}
+
+.warning-box-clear .warning-content strong {
+  color: #2b7a43;
+}
+
+.warning-box-clear .warning-action-btn {
+  border-color: #6cab7e;
+  background: #e3f5e8;
+  color: #205f35;
+}
+
+.warning-box-clear .warning-action-btn:hover {
+  background: #d4eedc;
+}
+
+.warning-box-clear .warning-copy-status {
+  background: #e3f5e8;
+  color: #205f35;
+  border-color: #8fc49d;
+}
+
+.warning-box-clear .warning-divider {
+  border-top-color: #9fccab;
+}
+
+.warning-clear-message {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #8fc49d;
+  border-radius: 4px;
+  background: #f7fdf9;
+  color: #205f35;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .warning-content strong {

@@ -381,6 +381,7 @@ function App() {
   const fewSubjectsIgnoredCount = ignoredStudentsWithFewSubjects.length;
 
   const fourSubjectsIgnoredCount = ignoredStudentsWithFourSubjects.length;
+  const hasActiveWarnings = activeStudentsWithFewSubjects.length > 0 || activeStudentsWithFourSubjects.length > 0;
 
   const warningStudentIds = new Set<string>([
     ...studentsWithFewSubjects.map((entry) => entry.studentId),
@@ -420,9 +421,6 @@ function App() {
   const saveWarningIgnore = (studentId: string, type: WarningType, explicitComment?: string) => {
     const rawComment = explicitComment ?? warningIgnoreDraftByStudentId[studentId] ?? '';
     const comment = rawComment.trim();
-    if (!comment) {
-      return;
-    }
 
     setWarningIgnoresByStudentAndType((prev) => ({
       ...prev,
@@ -631,17 +629,21 @@ function App() {
 
         {mergedData.length > 0 && (
           <>
-            {(studentsWithFewSubjects.length > 0 || studentsWithFourSubjects.length > 0) && (
-              <div className="warning-box">
+              <div className={`warning-box ${hasActiveWarnings ? '' : 'warning-box-clear'}`.trim()}>
                 <h3 
-                  className="collapsible-header warning-header" 
+                  className={`collapsible-header warning-header ${hasActiveWarnings ? '' : 'warning-header-clear'}`.trim()}
                   onClick={() => setWarningExpanded(!warningExpanded)}
                 >
                   <span className="chevron">{warningExpanded ? '▼' : '▶'}</span>
-                  ⚠️ Advarsel: {activeStudentsWithFewSubjects.length} under 3 fag, {activeStudentsWithFourSubjects.length} med 4+ fag
+                  {hasActiveWarnings
+                    ? `⚠️ Advarsel: ${activeStudentsWithFewSubjects.length} under 3 fag, ${activeStudentsWithFourSubjects.length} med 4+ fag`
+                    : '✅ Ingen aktive advarsler'}
                 </h3>
                 {warningExpanded && (
                   <div className="warning-content">
+                    {!hasActiveWarnings && studentsWithFewSubjects.length === 0 && studentsWithFourSubjects.length === 0 && (
+                      <p className="warning-clear-message">Alle elever har gyldig antall blokkfag.</p>
+                    )}
                     <div className="warning-actions">
                       <button type="button" className="warning-action-btn" onClick={handleWarningExport}>
                         Eksporter til Excel
@@ -680,7 +682,7 @@ function App() {
                             </div>
                             {ignored ? (
                               <div className="warning-ignore-row">
-                                <span className="warning-ignore-comment">Kommentar: {ignored.comment}</span>
+                                <span className="warning-ignore-comment">Kommentar: {ignored.comment || 'Ingen kommentar'}</span>
                                 <button
                                   type="button"
                                   className="warning-inline-btn"
@@ -695,7 +697,7 @@ function App() {
                                   type="text"
                                   maxLength={140}
                                   className="warning-ignore-input"
-                                  placeholder="Kort kommentar for ignorering"
+                                  placeholder="Kommentar (valgfritt)"
                                   value={warningIgnoreDraftByStudentId[studentId] || ''}
                                   onChange={(event) => {
                                     const value = event.target.value;
@@ -709,7 +711,6 @@ function App() {
                                   type="button"
                                   className="warning-inline-btn"
                                   onClick={() => saveWarningIgnore(studentId, 'missing')}
-                                  disabled={!(warningIgnoreDraftByStudentId[studentId] || '').trim()}
                                 >
                                   Ignorer
                                 </button>
@@ -744,7 +745,7 @@ function App() {
                             </div>
                             {ignored ? (
                               <div className="warning-ignore-row">
-                                <span className="warning-ignore-comment">Kommentar: {ignored.comment}</span>
+                                <span className="warning-ignore-comment">Kommentar: {ignored.comment || 'Ingen kommentar'}</span>
                                 <button
                                   type="button"
                                   className="warning-inline-btn"
@@ -759,7 +760,7 @@ function App() {
                                   type="text"
                                   maxLength={140}
                                   className="warning-ignore-input"
-                                  placeholder="Kort kommentar for ignorering"
+                                  placeholder="Kommentar (valgfritt)"
                                   value={warningIgnoreDraftByStudentId[studentId] || ''}
                                   onChange={(event) => {
                                     const value = event.target.value;
@@ -773,7 +774,6 @@ function App() {
                                   type="button"
                                   className="warning-inline-btn"
                                   onClick={() => saveWarningIgnore(studentId, 'overloaded')}
-                                  disabled={!(warningIgnoreDraftByStudentId[studentId] || '').trim()}
                                 >
                                   Ignorer
                                 </button>
@@ -786,7 +786,6 @@ function App() {
                   </div>
                 )}
               </div>
-            )}
             
             <div className="data-tabs" role="tablist" aria-label="Data visning">
               <button
