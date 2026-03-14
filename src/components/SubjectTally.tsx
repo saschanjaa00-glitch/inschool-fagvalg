@@ -16,11 +16,29 @@ interface SubjectTallyProps {
     >
   ) => void;
   onRemoveStudentsFromSubject: (subject: string, studentIds: string[], reason: string) => void;
+  onOpenStudentCard: (studentId: string) => void;
 }
 
 interface MathOptionCount {
   label: string;
   count: number;
+}
+
+interface ForeignLanguageOptionCount {
+  label: string;
+  count: number;
+}
+
+interface OptionStudent {
+  studentId: string;
+  navn: string;
+  klasse: string;
+}
+
+interface OptionRow {
+  label: string;
+  count: number;
+  students: OptionStudent[];
 }
 
 type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
@@ -348,6 +366,20 @@ const parseSubjects = (value: string | null): string[] => {
     .filter((subject) => subject.length > 0);
 };
 
+const parseForeignLanguageChoices = (value: string | null): string[] => {
+  if (!value) {
+    return [];
+  }
+
+  // Treat labels like "Tysk I+II, 2. år" as a single choice by removing year suffixes.
+  const withoutYearSuffix = value.replace(/,\s*\d+\.?\s*(?:år|ar)\b/gi, '');
+
+  return withoutYearSuffix
+    .split(/[,;/]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+};
+
 const isSameSubject = (left: string, right: string): boolean => {
   return left.localeCompare(right, 'nb', { sensitivity: 'base' }) === 0;
 };
@@ -362,6 +394,7 @@ export const SubjectTally = ({
   subjectSettingsByName,
   onSaveSubjectSettingsByName,
   onRemoveStudentsFromSubject,
+  onOpenStudentCard,
 }: SubjectTallyProps) => {
   const [markOverfilled, setMarkOverfilled] = useState(false);
   const [showOverfillModal, setShowOverfillModal] = useState(false);
@@ -373,6 +406,8 @@ export const SubjectTally = ({
   const [activeTrashSubject, setActiveTrashSubject] = useState<string | null>(null);
   const [deleteGroupConfirmState, setDeleteGroupConfirmState] = useState<DeleteGroupConfirmState | null>(null);
   const [isDeleteGroupConfirmArmed, setIsDeleteGroupConfirmArmed] = useState(false);
+  const [expandedMathOption, setExpandedMathOption] = useState<string | null>(null);
+  const [expandedForeignOption, setExpandedForeignOption] = useState<string | null>(null);
 
   const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
     const blokkCounts: Record<BlokkLabel, number> = {
@@ -658,27 +693,91 @@ export const SubjectTally = ({
     return selected;
   };
 
-  const countMathOption = (option: '2P' | 'S1' | 'R1'): number => {
-    return mergedData.reduce((count, student) => {
+  const sortOptionStudents = (students: OptionStudent[]): OptionStudent[] => {
+    return [...students].sort((left, right) => {
+      const classCompare = left.klasse.localeCompare(right.klasse, 'nb', { sensitivity: 'base' });
+      if (classCompare !== 0) {
+        return classCompare;
+      }
+
+      return left.navn.localeCompare(right.navn, 'nb', { sensitivity: 'base' });
+    });
+  };
+
+  const getStudentsForMathOption = (option: '2P' | 'S1' | 'R1'): OptionStudent[] => {
+    const students = mergedData.reduce<OptionStudent[]>((acc, student, index) => {
       const selected = extractMathOptionsFromBlokkMat(student.blokkmatvg2);
-      return count + (selected.has(option) ? 1 : 0);
-    }, 0);
+      if (!selected.has(option)) {
+        return acc;
+      }
+
+      acc.push({
+        studentId: getStudentId(student, index),
+        navn: student.navn || 'Ukjent',
+        klasse: student.klasse || 'Ingen klasse',
+      });
+      return acc;
+    }, []);
+
+    return sortOptionStudents(students);
   };
 
   const mathOptionCounts: MathOptionCount[] = [
-    {
-      label: 'Matematikk 2P',
-      count: countMathOption('2P'),
-    },
-    {
-      label: 'Matematikk S1',
-      count: countMathOption('S1'),
-    },
-    {
-      label: 'Matematikk R1',
-      count: countMathOption('R1'),
-    },
+    { label: 'Matematikk 2P', count: getStudentsForMathOption('2P').length },
+    { label: 'Matematikk S1', count: getStudentsForMathOption('S1').length },
+    { label: 'Matematikk R1', count: getStudentsForMathOption('R1').length },
   ];
+
+  const mathOptionRows: OptionRow[] = [
+    { label: 'Matematikk 2P', count: mathOptionCounts[0].count, students: getStudentsForMathOption('2P') },
+    { label: 'Matematikk S1', count: mathOptionCounts[1].count, students: getStudentsForMathOption('S1') },
+    { label: 'Matematikk R1', count: mathOptionCounts[2].count, students: getStudentsForMathOption('R1') },
+  ];
+
+  const foreignLanguageRows: OptionRow[] = useMemo(() => {
+    const byKey = new Map<string, { label: string; students: OptionStudent[] }>();
+
+    mergedData.forEach((student, index) => {
+      const rawValue = student.fremmedsprak;
+      if (!rawValue) {
+        return;
+      }
+
+      parseForeignLanguageChoices(rawValue).forEach((choice) => {
+          const key = choice.toLowerCase();
+          const existing = byKey.get(key);
+
+          const optionStudent: OptionStudent = {
+            studentId: getStudentId(student, index),
+            navn: student.navn || 'Ukjent',
+            klasse: student.klasse || 'Ingen klasse',
+          };
+
+          if (existing) {
+            existing.students.push(optionStudent);
+            return;
+          }
+
+          byKey.set(key, {
+            label: choice,
+            students: [optionStudent],
+          });
+        });
+    });
+
+    return Array.from(byKey.values())
+      .map((entry) => ({
+        label: entry.label,
+        count: entry.students.length,
+        students: sortOptionStudents(entry.students),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, 'nb', { sensitivity: 'base' }));
+  }, [mergedData]);
+
+  const foreignLanguageOptionCounts: ForeignLanguageOptionCount[] = foreignLanguageRows.map((row) => ({
+    label: row.label,
+    count: row.count,
+  }));
 
   const openOverfillModal = () => {
     const nextDrafts: Record<string, SubjectDraft> = {};
@@ -943,12 +1042,111 @@ export const SubjectTally = ({
           </tr>
         </thead>
         <tbody>
-          {mathOptionCounts.map((item) => (
-            <tr key={item.label}>
-              <td>{item.label}</td>
-              <td className={styles.mathCountCell}>{item.count}</td>
+          {mathOptionRows.flatMap((item) => {
+            const rows = [
+              <tr key={item.label}>
+                <td>
+                  <button
+                    type="button"
+                    className={styles.optionToggleBtn}
+                    onClick={() => setExpandedMathOption((prev) => (prev === item.label ? null : item.label))}
+                  >
+                    {item.label}
+                  </button>
+                </td>
+                <td className={styles.mathCountCell}>{item.count}</td>
+              </tr>
+            ];
+
+            if (expandedMathOption === item.label) {
+              rows.push(
+                <tr key={`${item.label}-students`}>
+                  <td colSpan={2} className={styles.optionStudentsCell}>
+                    <div className={styles.optionStudentsList}>
+                      {item.students.length === 0 ? (
+                        <span className={styles.optionEmptyText}>Ingen elever</span>
+                      ) : (
+                        item.students.map((student) => (
+                          <button
+                            key={`${item.label}-${student.studentId}`}
+                            type="button"
+                            className={styles.optionStudentLink}
+                            onClick={() => onOpenStudentCard(student.studentId)}
+                          >
+                            {student.klasse} - {student.navn}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
+
+            return rows;
+          })}
+        </tbody>
+      </table>
+
+      <h4 className={styles.subSectionTitle}>Fremmedspråkvalg</h4>
+      <table className={styles.mathTable}>
+        <thead>
+          <tr>
+            <th>Fag</th>
+            <th>Antall</th>
+          </tr>
+        </thead>
+        <tbody>
+          {foreignLanguageOptionCounts.length === 0 ? (
+            <tr>
+              <td>Ingen registrerte valg</td>
+              <td className={styles.mathCountCell}>0</td>
             </tr>
-          ))}
+          ) : (
+            foreignLanguageRows.flatMap((item) => {
+              const rows = [
+                <tr key={item.label}>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.optionToggleBtn}
+                      onClick={() => setExpandedForeignOption((prev) => (prev === item.label ? null : item.label))}
+                    >
+                      {item.label}
+                    </button>
+                  </td>
+                  <td className={styles.mathCountCell}>{item.count}</td>
+                </tr>
+              ];
+
+              if (expandedForeignOption === item.label) {
+                rows.push(
+                  <tr key={`${item.label}-students`}>
+                    <td colSpan={2} className={styles.optionStudentsCell}>
+                      <div className={styles.optionStudentsList}>
+                        {item.students.length === 0 ? (
+                          <span className={styles.optionEmptyText}>Ingen elever</span>
+                        ) : (
+                          item.students.map((student) => (
+                            <button
+                              key={`${item.label}-${student.studentId}`}
+                              type="button"
+                              className={styles.optionStudentLink}
+                              onClick={() => onOpenStudentCard(student.studentId)}
+                            >
+                              {student.klasse} - {student.navn}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+
+              return rows;
+            })
+          )}
         </tbody>
       </table>
 

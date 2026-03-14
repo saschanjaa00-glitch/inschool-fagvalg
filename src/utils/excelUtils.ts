@@ -69,6 +69,14 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
             columnMapping.push(idx);
           }
         });
+
+        // Fourth pass: get foreign language columns from row-4 labels.
+        blockHeaders.forEach((header, idx) => {
+          if (header && isForeignLanguageHeader(header)) {
+            headers.push(header);
+            columnMapping.push(idx);
+          }
+        });
         
         // Data starts from row 6 (index 5)
         const jsonData: Record<string, string>[] = [];
@@ -123,6 +131,17 @@ const isReserveHeader = (header: string): boolean => {
   return normalized.includes('reserve') || normalized === 'res';
 };
 
+const isForeignLanguageHeader = (header: string): boolean => {
+  const normalized = header
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+  return normalized.includes('fremmedsprak') || normalized.includes('fsp');
+};
+
 const isMath2PHeader = (header: string): boolean => {
   const normalized = header.trim().toLowerCase();
   return normalized === 'matematikk 2p' || normalized === '2p';
@@ -146,6 +165,7 @@ export interface StandardField {
   matematikk2p: string | null;
   matematikks1: string | null;
   matematikkr1: string | null;
+  fremmedsprak: string | null;
   blokk1: string | null;
   blokk2: string | null;
   blokk3: string | null;
@@ -201,6 +221,10 @@ export const autoDetectMapping = (
     // Map Reserve columns
     else if (isReserveHeader(col)) {
       mapping[col] = 'reserve';
+    }
+    // Map foreign language columns
+    else if (isForeignLanguageHeader(col)) {
+      mapping[col] = 'fremmedsprak';
     }
     // Map Blokk columns
     else if (colLower.includes('blokk')) {
@@ -284,6 +308,7 @@ export const mergeFiles = (
         matematikk2p: null,
         matematikks1: null,
         matematikkr1: null,
+        fremmedsprak: null,
         blokk1: null,
         blokk2: null,
         blokk3: null,
@@ -482,6 +507,58 @@ export const swapSubjectAssignmentsBetweenBlokker = (
       [fieldA]: formatSubjects(nextA),
       [fieldB]: formatSubjects(nextB),
     };
+  });
+
+  return { updatedData, changes };
+};
+
+export const removeSubjectAssignmentsForStudents = (
+  data: StandardField[],
+  subject: string,
+  studentIdsToUpdate: string[],
+  reason: string
+): { updatedData: StandardField[]; changes: StudentAssignmentChange[] } => {
+  if (studentIdsToUpdate.length === 0) {
+    return { updatedData: data, changes: [] };
+  }
+
+  const targetStudentIds = new Set(studentIdsToUpdate);
+  const changes: StudentAssignmentChange[] = [];
+
+  const updatedData = data.map((student, index) => {
+    const studentId = student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
+    if (!targetStudentIds.has(studentId)) {
+      return student;
+    }
+
+    let didChange = false;
+    const nextStudent: StandardField = { ...student };
+
+    for (let blokkNumber = 1; blokkNumber <= 8; blokkNumber += 1) {
+      const blokkField = getBlokkField(blokkNumber);
+      const currentSubjects = parseSubjects(typeof nextStudent[blokkField] === 'string' ? nextStudent[blokkField] : null);
+      const remainingSubjects = currentSubjects.filter((value) => !isSameSubject(value, subject));
+
+      if (remainingSubjects.length === currentSubjects.length) {
+        continue;
+      }
+
+      didChange = true;
+      nextStudent[blokkField] = formatSubjects(remainingSubjects);
+
+      changes.push({
+        studentId,
+        navn: student.navn || 'Ukjent',
+        klasse: student.klasse || 'Ingen klasse',
+        subject,
+        fromBlokk: blokkNumber,
+        toBlokk: 0,
+        reason,
+        changedAt: new Date().toISOString(),
+      });
+    }
+
+    return didChange ? nextStudent : student;
   });
 
   return { updatedData, changes };

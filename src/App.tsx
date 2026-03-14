@@ -66,6 +66,8 @@ function App() {
   const [selectedEleverStudentId, setSelectedEleverStudentId] = useState('');
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
+  const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
+  const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
 
   useEffect(() => {
     try {
@@ -216,6 +218,25 @@ function App() {
     setSubjects(tallySubjects(merged));
     setStudentAssignmentChanges([]);
     setActiveDataTab('subjects');
+  };
+
+  const closeReloadConfirmModal = () => {
+    setShowReloadConfirmModal(false);
+    setIsReloadConfirmArmed(false);
+  };
+
+  const handleLoadDataClick = () => {
+    if (parsedFiles.length === 0) {
+      return;
+    }
+
+    if (mergedData.length > 0) {
+      setShowReloadConfirmModal(true);
+      setIsReloadConfirmArmed(false);
+      return;
+    }
+
+    handleMerge();
   };
 
   const handleReset = () => {
@@ -930,8 +951,8 @@ function App() {
                   )}
 
                   <div className="action-buttons">
-                    <button onClick={handleMerge} className="merge-btn" disabled={parsedFiles.length === 0}>
-                      Slå sammen data
+                    <button onClick={handleLoadDataClick} className="load-btn" disabled={parsedFiles.length === 0}>
+                      Last inn data
                     </button>
                     <button onClick={handleClearStoredData} className="clear-storage-btn">
                       Tøm data
@@ -970,6 +991,7 @@ function App() {
                   onSaveSubjectSettingsByName={setSubjectSettingsByName}
                   onApplySubjectBlockMoves={handleApplySubjectBlockMoves}
                   onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
+                  onOpenStudentCard={handleOpenStudentInElever}
                 />
               ) : activeDataTab === 'students' ? (
                 <MergedDataView
@@ -996,6 +1018,67 @@ function App() {
                 />
               )}
             </div>
+
+            {showReloadConfirmModal && (
+              <div
+                className="app-modal-overlay"
+                onClick={() => {
+                  if (isReloadConfirmArmed) {
+                    setIsReloadConfirmArmed(false);
+                    return;
+                  }
+
+                  closeReloadConfirmModal();
+                }}
+              >
+                <div
+                  className="app-confirm-modal"
+                  onClick={(event) => {
+                    event.stopPropagation();
+
+                    if (isReloadConfirmArmed) {
+                      setIsReloadConfirmArmed(false);
+                    }
+                  }}
+                >
+                  <h4>Last inn data på nytt?</h4>
+                  <p className="app-confirm-message">
+                    Dette vil overstyre alle endringer som er gjort.
+                  </p>
+                  <div className="app-confirm-actions">
+                    <button
+                      type="button"
+                      className="app-confirm-btn app-confirm-secondary"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeReloadConfirmModal();
+                      }}
+                    >
+                      Nei
+                    </button>
+                    <button
+                      type="button"
+                      className={`app-confirm-btn app-confirm-primary ${
+                        isReloadConfirmArmed ? 'app-confirm-armed' : ''
+                      }`.trim()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        if (isReloadConfirmArmed) {
+                          handleMerge();
+                          closeReloadConfirmModal();
+                          return;
+                        }
+
+                        setIsReloadConfirmArmed(true);
+                      }}
+                    >
+                      {isReloadConfirmArmed ? 'Bekreft' : 'Ja'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 

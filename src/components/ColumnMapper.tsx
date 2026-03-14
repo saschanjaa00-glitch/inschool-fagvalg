@@ -10,7 +10,16 @@ interface ColumnMapperProps {
   onBlokkCountChange: (count: number) => void;
 }
 
-const STANDARD_FIELDS_BASE = ['navn', 'klasse', 'blokkmatvg2', 'matematikk2p', 'matematikks1', 'matematikkr1', 'reserve'];
+const STANDARD_FIELDS_BASE = [
+  'navn',
+  'klasse',
+  'blokkmatvg2',
+  'matematikk2p',
+  'matematikks1',
+  'matematikkr1',
+  'fremmedsprak',
+  'reserve',
+];
 const FIELD_LABELS: Record<string, string> = {
   navn: 'Navn',
   klasse: 'Klasse',
@@ -18,6 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
   matematikk2p: 'Matematikk 2P',
   matematikks1: 'Matematikk S1',
   matematikkr1: 'Matematikk R1',
+  fremmedsprak: 'Fremmedspråk',
   reserve: 'Reserve',
   blokk1: 'Blokk 1',
   blokk2: 'Blokk 2',
@@ -102,11 +112,20 @@ export const ColumnMapper = ({
         const fileMapping = currentMappings.get(file.id) || {};
         const reverseMapping = getReverseMapping(fileMapping);
         
+        const hasCombinedMathColumn = !!reverseMapping.blokkmatvg2;
+        const fieldsForFile = STANDARD_FIELDS.filter((field) => {
+          if (!hasCombinedMathColumn) {
+            return true;
+          }
+
+          return field !== 'matematikk2p' && field !== 'matematikks1' && field !== 'matematikkr1';
+        });
+
         return (
           <div key={file.id} className={styles.fileSection}>
             <h3>{file.filename}</h3>
             <div className={styles.mappingGrid}>
-              {STANDARD_FIELDS.map((field) => (
+              {fieldsForFile.map((field) => (
                 <div key={field} className={styles.mappingRow}>
                   <label>{FIELD_LABELS[field]}</label>
                   <select
