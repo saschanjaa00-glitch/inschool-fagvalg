@@ -394,6 +394,7 @@ export const SubjectTally = ({
   mergedData,
   subjectSettingsByName,
   onSaveSubjectSettingsByName,
+  onApplySubjectBlockMoves,
   onRemoveStudentsFromSubject,
   onOpenStudentCard,
 }: SubjectTallyProps) => {
@@ -512,7 +513,16 @@ export const SubjectTally = ({
 
   const moveGroupToBlokk = (subject: string, groupId: string, targetBlokk: BlokkLabel) => {
     const breakdown = getBlokkBreakdown(subject);
-    const { groups } = getResolvedForSubject(subject, breakdown);
+    const { groups, groupsByTarget } = getResolvedForSubject(subject, breakdown);
+    const allResolvedGroups = BLOKK_LABELS.flatMap((blokk) => groupsByTarget[blokk]);
+    const movingGroup = allResolvedGroups.find((group) => group.id === groupId);
+    const sourceBlokk = movingGroup?.blokk;
+    const sourceEnabledGroups = sourceBlokk ? groupsByTarget[sourceBlokk].filter((group) => group.enabled) : [];
+    const shouldMoveStudentsWithGroup = !!movingGroup
+      && movingGroup.enabled
+      && sourceEnabledGroups.length === 1
+      && sourceEnabledGroups[0].id === movingGroup.id
+      && sourceBlokk !== targetBlokk;
 
     const nextGroups = groups.map((group) => {
       if (group.id !== groupId) {
@@ -526,6 +536,17 @@ export const SubjectTally = ({
     });
 
     saveSubjectGroups(subject, nextGroups);
+
+    if (shouldMoveStudentsWithGroup && sourceBlokk) {
+      onApplySubjectBlockMoves(subject, [
+        {
+          type: 'move',
+          fromBlokk: getBlokkNumber(sourceBlokk),
+          toBlokk: getBlokkNumber(targetBlokk),
+          reason: `Fagoversikt: flyttet gruppe ${movingGroup.label} fra ${sourceBlokk} til ${targetBlokk}`,
+        },
+      ]);
+    }
   };
 
   const addExtraGroupToTarget = (subject: string, target: BlokkLabel) => {
