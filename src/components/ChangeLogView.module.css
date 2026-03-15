@@ -95,6 +95,14 @@
   text-decoration: underline;
 }
 
+.studentAllocation {
+  margin: 0;
+  padding: 6px 10px 0;
+  color: #5e6c7d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .changeList {
   margin: 0;
   padding: 8px 10px 10px 24px;

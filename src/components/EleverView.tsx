@@ -192,6 +192,7 @@ export const EleverView = ({
   externallySelectedStudentId,
 }: EleverViewProps) => {
   const studentRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const hasInitializedSelectionRef = useRef(false);
   const [studentQuery, setStudentQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StudentFilter>('all');
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -261,6 +262,17 @@ export const EleverView = ({
   }, [activeFilter, studentQuery, studentSummaries]);
 
   useEffect(() => {
+    if (selectedStudentId || hasInitializedSelectionRef.current) {
+      return;
+    }
+
+    if (filteredStudents.length > 0) {
+      hasInitializedSelectionRef.current = true;
+      setSelectedStudentId(filteredStudents[0].studentId);
+    }
+  }, [filteredStudents, selectedStudentId]);
+
+  useEffect(() => {
     if (filteredStudents.length === 0) {
       setSelectedStudentId('');
       return;
@@ -268,9 +280,15 @@ export const EleverView = ({
 
     const stillVisible = filteredStudents.some((entry) => entry.studentId === selectedStudentId);
     if (!stillVisible) {
-      setSelectedStudentId(filteredStudents[0].studentId);
+      if (selectedStudentId) {
+        setStatusMessage('Eleven er ikke lenger i gjeldende filter. Velg en elev fra listen.');
+        window.setTimeout(() => {
+          setStatusMessage('');
+        }, 3000);
+      }
+      setSelectedStudentId('');
     }
-  }, [filteredStudents, selectedStudentId]);
+  }, [activeFilter, studentQuery, filteredStudents, selectedStudentId]);
 
   useEffect(() => {
     setEditAssignment(null);
@@ -286,6 +304,7 @@ export const EleverView = ({
       return;
     }
 
+    hasInitializedSelectionRef.current = true;
     setActiveFilter('all');
     setStudentQuery('');
     setSelectedStudentId(externallySelectedStudentId);
@@ -584,8 +603,8 @@ export const EleverView = ({
   }
 
   const selectedStudentEntry = useMemo(() => {
-    return filteredStudents.find((entry) => entry.studentId === selectedStudentId) || null;
-  }, [filteredStudents, selectedStudentId]);
+    return studentSummaries.find((entry) => entry.studentId === selectedStudentId) || null;
+  }, [studentSummaries, selectedStudentId]);
 
   const selectedStudentReserveLabel = useMemo(() => {
     if (!selectedStudentEntry) {
@@ -795,7 +814,28 @@ export const EleverView = ({
       return;
     }
 
-    if (!subjectToAdd && sortedSubjectOptions.length > 0) {
+    const reserveSubjects = parseSubjects(selectedStudentEntry.student.reserve);
+    const preferredReserveSubject = selectedStudentEntry.missing
+      ? reserveSubjects.find((reserveSubject) => {
+          const availableOption = sortedSubjectOptions.find((option) => isSameSubject(option, reserveSubject));
+          if (!availableOption) {
+            return false;
+          }
+
+          const alreadyAssigned = selectedStudentEntry.assignments.some((assignment) =>
+            isSameSubject(assignment.subject, availableOption)
+          );
+
+          return !alreadyAssigned;
+        })
+      : undefined;
+
+    if (preferredReserveSubject) {
+      const availableOption = sortedSubjectOptions.find((option) => isSameSubject(option, preferredReserveSubject));
+      if (availableOption) {
+        setSubjectToAdd(availableOption);
+      }
+    } else if (!subjectToAdd && sortedSubjectOptions.length > 0) {
       setSubjectToAdd(sortedSubjectOptions[0]);
     }
 

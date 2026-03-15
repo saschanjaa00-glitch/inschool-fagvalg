@@ -59,6 +59,35 @@ const escapeHtml = (value: string): string => {
     .replaceAll("'", '&#39;');
 };
 
+const parseSubjects = (value: string | null | undefined): string[] => {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[,;]/)
+    .map((subject) => subject.trim())
+    .filter((subject) => subject.length > 0);
+};
+
+const formatFinalAllocation = (student: StandardField | undefined): string => {
+  if (!student) {
+    return '';
+  }
+
+  return BLOKK_FIELDS
+    .map((blokkField, index) => {
+      const subjects = parseSubjects(student[blokkField] as string | null | undefined);
+      if (subjects.length === 0) {
+        return '';
+      }
+
+      return `B${index + 1}: ${subjects.join(', ')}`;
+    })
+    .filter((value) => value.length > 0)
+    .join(' | ');
+};
+
 const getChangeType = (fromBlokk: number, toBlokk: number): ChangeType => {
   if (fromBlokk <= 0 && toBlokk > 0) {
     return 'added';
@@ -225,6 +254,18 @@ export const ChangeLogView = ({ changeLog, currentStudents, onOpenStudentCard }:
     return groupedSummaries;
   }, [groupedSummaries, mode]);
 
+  const finalAllocationByStudentId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    groupedSummaries.forEach((group) => {
+      const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
+      const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
+      map.set(group.studentId, formatFinalAllocation(currentStudent));
+    });
+
+    return map;
+  }, [groupedSummaries, studentsById, studentsByNameClass]);
+
   const formatBlokk = (value: number) => {
     if (value <= 0) {
       return 'ingen blokk';
@@ -292,28 +333,7 @@ export const ChangeLogView = ({ changeLog, currentStudents, onOpenStudentCard }:
       const studentRows = visibleGroups.map((group) => {
         const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
         const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
-
-        const finalSelection = currentStudent
-          ? BLOKK_FIELDS
-            .map((blokkField, index) => {
-              const blokkNumber = index + 1;
-              const rawValue = currentStudent[blokkField];
-              const subjects = typeof rawValue === 'string'
-                ? rawValue
-                  .split(/[,;]/)
-                  .map((subject) => subject.trim())
-                  .filter((subject) => subject.length > 0)
-                : [];
-
-              if (subjects.length === 0) {
-                return '';
-              }
-
-              return `${blokkNumber}: ${subjects.join(', ')}`;
-            })
-            .filter((value) => value.length > 0)
-            .join(' | ')
-          : '';
+        const finalSelection = formatFinalAllocation(currentStudent);
 
         const changeLines = mode === 'detailed'
           ? group.changes
@@ -398,6 +418,11 @@ export const ChangeLogView = ({ changeLog, currentStudents, onOpenStudentCard }:
               `${group.navn} (${group.klasse}) - ${mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer`
             )}
           </h4>
+          {mode === 'summary' && (
+            <p className={styles.studentAllocation}>
+              {finalAllocationByStudentId.get(group.studentId) || 'Ingen aktive fagvalg registrert'}
+            </p>
+          )}
           <ul className={styles.changeList}>
             {mode === 'detailed'
               ? group.changes.map((entry, index) => {

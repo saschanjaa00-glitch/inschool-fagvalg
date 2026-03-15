@@ -347,13 +347,15 @@
   background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   z-index: 1200;
-  padding: 12px;
+  padding: 14px;
 }
 
 .modal {
-  width: min(460px, 94vw);
+  width: min(420px, 94vw);
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #d9d9d9;
   border-radius: 8px;
@@ -468,5 +470,16 @@
 
   .studentList {
     max-height: 260px;
+  }
+
+  .modalOverlay {
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+
+  .modal {
+    width: min(460px, 94vw);
+    max-height: calc(100vh - 24px);
   }
 }
