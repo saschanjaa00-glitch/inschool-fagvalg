@@ -105,6 +105,7 @@
   border-collapse: collapse;
   font-size: 12px;
   margin-bottom: 10px;
+  table-layout: fixed;
 }
 
 .mathTable thead {
@@ -127,6 +128,14 @@
 
 .mathTable tbody tr:hover {
   background: #f5f5f5;
+}
+
+.mathCountColumn {
+  width: 140px;
+}
+
+.mathCountHeader {
+  text-align: center !important;
 }
 
 .mathCountCell {

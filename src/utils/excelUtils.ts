@@ -673,7 +673,8 @@ const getCombinedBlockCodes = (row: StandardField): string => {
 export const exportToExcel = async (mergedData: StandardField[], filename: string = 'merged_students.xlsx') => {
   const XLSX = await loadXlsx();
 
-  const exportData = mergedData.map((row) => ({
+  const exportData = mergedData.map((row, index) => ({
+    'Student ID': (1001 + index).toString(),
     'Navn': row.navn || '',
     'Klasse': row.klasse || '',
     'Blokk': getCombinedBlockCodes(row),
@@ -686,6 +687,7 @@ export const exportToExcel = async (mergedData: StandardField[], filename: strin
   
   // Set column widths
   worksheet['!cols'] = [
+    { wch: 12 },
     { wch: 20 },
     { wch: 12 },
     { wch: 32 },

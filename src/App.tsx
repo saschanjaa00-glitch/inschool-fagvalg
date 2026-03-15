@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type { ParsedFile, ColumnMapping, StandardField, SubjectCount, StudentAssignmentChange } from './utils/excelUtils';
 import {
   mergeFiles,
@@ -29,6 +29,8 @@ import {
 } from './utils/progressiveHybridBalance';
 
 const LOCAL_STORAGE_KEY = 'fagvalg-opptelling-state-v1';
+const JSON_TRANSFER_FORMAT = 'inschool-balansering-state';
+const JSON_TRANSFER_VERSION = 1;
 
 interface PersistedAppState {
   parsedFiles: ParsedFile[];
@@ -45,6 +47,13 @@ interface PersistedAppState {
   classBlockRestrictions?: ClassBlockRestrictions;
 }
 
+interface ExportedAppStateFile {
+  format: string;
+  version: number;
+  exportedAt: string;
+  appState: PersistedAppState;
+}
+
 type WarningType = 'missing' | 'overloaded';
 
 interface WarningIgnoreEntry {
@@ -53,8 +62,11 @@ interface WarningIgnoreEntry {
 }
 
 type GroupSubview = 'subjects' | 'groups';
+type StudentSubview = 'elever' | 'students';
 
 function App() {
+  const jsonImportInputRef = useRef<HTMLInputElement | null>(null);
+  const studentExportMenuRef = useRef<HTMLDivElement | null>(null);
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
   const [mappings, setMappings] = useState<Map<string, ColumnMapping>>(new Map());
   const [mergedData, setMergedData] = useState<StandardField[]>([]);
@@ -65,9 +77,10 @@ function App() {
   
   const [columnMapperExpanded, setColumnMapperExpanded] = useState(false);
   const [activeDataTab, setActiveDataTab] = useState<
-    'import' | 'subjects' | 'groups' | 'students' | 'elever' | 'balancing' | 'changelog'
+    'import' | 'subjects' | 'groups' | 'students' | 'elever' | 'balancing' | 'changelog' | 'export'
   >('import');
   const [activeGroupTab, setActiveGroupTab] = useState<GroupSubview>('subjects');
+  const [activeStudentTab, setActiveStudentTab] = useState<StudentSubview>('elever');
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningBlokkCollisionExpanded, setWarningBlokkCollisionExpanded] = useState(false);
   const [warningFewSubjectsExpanded, setWarningFewSubjectsExpanded] = useState(false);
@@ -85,12 +98,138 @@ function App() {
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
   const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
   const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
+  const [jsonTransferStatus, setJsonTransferStatus] = useState('');
+  const [isStudentExportMenuOpen, setIsStudentExportMenuOpen] = useState(false);
+
+  const showJsonTransferStatus = (message: string) => {
+    setJsonTransferStatus(message);
+
+    window.setTimeout(() => {
+      setJsonTransferStatus('');
+    }, 3000);
+  };
+
+  const buildPersistedState = (): PersistedAppState => ({
+    parsedFiles,
+    mappings: Object.fromEntries(mappings.entries()),
+    mergedData,
+    subjects,
+    studentAssignmentChanges,
+    subjectSettingsByName,
+    warningIgnoresByStudentAndType,
+    blokkCount,
+    selectedMergedSubject,
+    classBlockRestrictions,
+  });
+
+  const applyPersistedState = (parsedState: Partial<PersistedAppState>) => {
+    const importedParsedFiles = Array.isArray(parsedState.parsedFiles) ? parsedState.parsedFiles : [];
+    const importedMergedData = Array.isArray(parsedState.mergedData) ? parsedState.mergedData : [];
+
+    setParsedFiles(importedParsedFiles);
+    setMappings(
+      parsedState.mappings && typeof parsedState.mappings === 'object'
+        ? new Map(Object.entries(parsedState.mappings))
+        : new Map()
+    );
+    setMergedData(importedMergedData);
+    setSubjects(
+      Array.isArray(parsedState.subjects)
+        ? parsedState.subjects
+        : importedMergedData.length > 0
+          ? tallySubjects(importedMergedData)
+          : []
+    );
+    setStudentAssignmentChanges(
+      Array.isArray(parsedState.studentAssignmentChanges) ? parsedState.studentAssignmentChanges : []
+    );
+
+    if (parsedState.subjectSettingsByName && typeof parsedState.subjectSettingsByName === 'object') {
+      setSubjectSettingsByName(parsedState.subjectSettingsByName);
+    } else if (parsedState.subjectMaxByName && typeof parsedState.subjectMaxByName === 'object') {
+      const migrated: SubjectSettingsByName = Object.fromEntries(
+        Object.entries(parsedState.subjectMaxByName).map(([subject, max]) => [
+          subject,
+          {
+            defaultMax: typeof max === 'number' ? max : 30,
+            blokkMaxOverrides: {},
+            blokkEnabled: {
+              'Blokk 1': true,
+              'Blokk 2': true,
+              'Blokk 3': true,
+              'Blokk 4': true,
+            },
+            blokkOrder: ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'],
+          },
+        ])
+      ) as SubjectSettingsByName;
+      setSubjectSettingsByName(migrated);
+    } else {
+      setSubjectSettingsByName({});
+    }
+
+    if (parsedState.warningIgnoresByStudentAndType && typeof parsedState.warningIgnoresByStudentAndType === 'object') {
+      setWarningIgnoresByStudentAndType(parsedState.warningIgnoresByStudentAndType);
+    } else if (parsedState.warningIgnoresByStudentId && typeof parsedState.warningIgnoresByStudentId === 'object') {
+      const migrated = Object.fromEntries(
+        Object.entries(parsedState.warningIgnoresByStudentId).map(([studentId, value]) => [
+          studentId,
+          {
+            missing: value,
+          },
+        ])
+      ) as Record<string, Partial<Record<WarningType, WarningIgnoreEntry>>>;
+      setWarningIgnoresByStudentAndType(migrated);
+    } else {
+      setWarningIgnoresByStudentAndType({});
+    }
+
+    setBlokkCount(typeof parsedState.blokkCount === 'number' ? parsedState.blokkCount : 4);
+    setSelectedMergedSubject(typeof parsedState.selectedMergedSubject === 'string' ? parsedState.selectedMergedSubject : '');
+    setClassBlockRestrictions(
+      parsedState.classBlockRestrictions && typeof parsedState.classBlockRestrictions === 'object'
+        ? parsedState.classBlockRestrictions
+        : DEFAULT_CLASS_BLOCK_RESTRICTIONS
+    );
+    setWarningIgnoreDraftByStudentId({});
+    setSelectedEleverStudentId('');
+    setColumnMapperExpanded(importedParsedFiles.length > 0 && importedMergedData.length === 0);
+    setShowReloadConfirmModal(false);
+    setIsReloadConfirmArmed(false);
+    setActiveGroupTab('subjects');
+    setActiveStudentTab('elever');
+    setActiveDataTab(importedMergedData.length > 0 ? 'subjects' : 'import');
+  };
 
   useEffect(() => {
     if (activeDataTab === 'subjects' || activeDataTab === 'groups') {
       setActiveGroupTab(activeDataTab);
     }
   }, [activeDataTab]);
+
+  useEffect(() => {
+    if (activeDataTab === 'elever' || activeDataTab === 'students') {
+      setActiveStudentTab(activeDataTab);
+    }
+  }, [activeDataTab]);
+
+  useEffect(() => {
+    if (!isStudentExportMenuOpen) {
+      return;
+    }
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!studentExportMenuRef.current?.contains(event.target as Node)) {
+        setIsStudentExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentClick);
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentClick);
+    };
+  }, [isStudentExportMenuOpen]);
 
   useEffect(() => {
     try {
@@ -100,76 +239,7 @@ function App() {
       }
 
       const parsedState = JSON.parse(savedState) as Partial<PersistedAppState>;
-
-      if (Array.isArray(parsedState.parsedFiles)) {
-        setParsedFiles(parsedState.parsedFiles);
-      }
-
-      if (parsedState.mappings && typeof parsedState.mappings === 'object') {
-        setMappings(new Map(Object.entries(parsedState.mappings)));
-      }
-
-      if (Array.isArray(parsedState.mergedData)) {
-        setMergedData(parsedState.mergedData);
-      }
-
-      if (Array.isArray(parsedState.subjects)) {
-        setSubjects(parsedState.subjects);
-      }
-
-      if (Array.isArray(parsedState.studentAssignmentChanges)) {
-        setStudentAssignmentChanges(parsedState.studentAssignmentChanges);
-      }
-
-      if (parsedState.subjectSettingsByName && typeof parsedState.subjectSettingsByName === 'object') {
-        setSubjectSettingsByName(parsedState.subjectSettingsByName);
-      } else if (parsedState.subjectMaxByName && typeof parsedState.subjectMaxByName === 'object') {
-        // Backward compatibility for persisted v1 shape.
-        const migrated: SubjectSettingsByName = Object.fromEntries(
-          Object.entries(parsedState.subjectMaxByName).map(([subject, max]) => [
-            subject,
-            {
-              defaultMax: typeof max === 'number' ? max : 30,
-              blokkMaxOverrides: {},
-              blokkEnabled: {
-                'Blokk 1': true,
-                'Blokk 2': true,
-                'Blokk 3': true,
-                'Blokk 4': true,
-              },
-              blokkOrder: ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'],
-            },
-          ])
-        ) as SubjectSettingsByName;
-        setSubjectSettingsByName(migrated);
-      }
-
-      if (parsedState.warningIgnoresByStudentAndType && typeof parsedState.warningIgnoresByStudentAndType === 'object') {
-        setWarningIgnoresByStudentAndType(parsedState.warningIgnoresByStudentAndType);
-      } else if (parsedState.warningIgnoresByStudentId && typeof parsedState.warningIgnoresByStudentId === 'object') {
-        // Backward compatibility for warning ignores stored without type.
-        const migrated = Object.fromEntries(
-          Object.entries(parsedState.warningIgnoresByStudentId).map(([studentId, value]) => [
-            studentId,
-            {
-              missing: value,
-            },
-          ])
-        ) as Record<string, Partial<Record<WarningType, WarningIgnoreEntry>>>;
-        setWarningIgnoresByStudentAndType(migrated);
-      }
-
-      if (typeof parsedState.blokkCount === 'number') {
-        setBlokkCount(parsedState.blokkCount);
-      }
-
-      if (typeof parsedState.selectedMergedSubject === 'string') {
-        setSelectedMergedSubject(parsedState.selectedMergedSubject);
-      }
-
-      if (parsedState.classBlockRestrictions && typeof parsedState.classBlockRestrictions === 'object') {
-        setClassBlockRestrictions(parsedState.classBlockRestrictions);
-      }
+      applyPersistedState(parsedState);
     } catch {
       // Ignore malformed localStorage data and continue with fresh state.
     } finally {
@@ -182,18 +252,7 @@ function App() {
       return;
     }
 
-    const persistedState: PersistedAppState = {
-      parsedFiles,
-      mappings: Object.fromEntries(mappings.entries()),
-      mergedData,
-      subjects,
-      studentAssignmentChanges,
-      subjectSettingsByName,
-      warningIgnoresByStudentAndType,
-      blokkCount,
-      selectedMergedSubject,
-      classBlockRestrictions,
-    };
+    const persistedState = buildPersistedState();
 
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(persistedState));
   }, [
@@ -280,6 +339,12 @@ function App() {
     setSelectedEleverStudentId('');
     setSelectedMergedSubject('');
     setClassBlockRestrictions(DEFAULT_CLASS_BLOCK_RESTRICTIONS);
+    setColumnMapperExpanded(false);
+    setActiveDataTab('import');
+    setActiveGroupTab('subjects');
+    setActiveStudentTab('elever');
+    setShowReloadConfirmModal(false);
+    setIsReloadConfirmArmed(false);
   };
 
   const handleApplyBalancingResult = (result: ProgressiveHybridBalanceResult) => {
@@ -396,6 +461,85 @@ function App() {
 
   const handleExportText = () => {
     exportToTabText(mergedData, 'merged_students.txt');
+  };
+
+  const handleStudentListExport = (exportType: 'novaschem' | 'excel-full' | 'txt') => {
+    setIsStudentExportMenuOpen(false);
+
+    if (exportType === 'novaschem') {
+      void handleExport();
+      return;
+    }
+
+    if (exportType === 'excel-full') {
+      void handleExportDetailed();
+      return;
+    }
+
+    handleExportText();
+  };
+
+  const handleExportJson = () => {
+    const exportedState: ExportedAppStateFile = {
+      format: JSON_TRANSFER_FORMAT,
+      version: JSON_TRANSFER_VERSION,
+      exportedAt: new Date().toISOString(),
+      appState: buildPersistedState(),
+    };
+
+    const blob = new Blob([JSON.stringify(exportedState, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[.:]/g, '-');
+
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `inschool-balansering-${timestamp}.json`;
+    downloadLink.click();
+
+    URL.revokeObjectURL(downloadUrl);
+    showJsonTransferStatus('JSON eksportert');
+  };
+
+  const handleImportJsonClick = () => {
+    jsonImportInputRef.current?.click();
+  };
+
+  const handleImportJson = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if ((parsedFiles.length > 0 || mergedData.length > 0) && !window.confirm('Dette vil erstatte gjeldende arbeidsdata. Fortsette?')) {
+      return;
+    }
+
+    try {
+      const fileText = await file.text();
+      const parsedJson = JSON.parse(fileText) as Partial<ExportedAppStateFile & PersistedAppState>;
+      const importedState = parsedJson
+        && typeof parsedJson === 'object'
+        && parsedJson.format === JSON_TRANSFER_FORMAT
+        && parsedJson.version === JSON_TRANSFER_VERSION
+        && parsedJson.appState
+        && typeof parsedJson.appState === 'object'
+          ? parsedJson.appState
+          : parsedJson;
+
+      if (!importedState || typeof importedState !== 'object') {
+        throw new Error('Invalid JSON state');
+      }
+
+      applyPersistedState(importedState as Partial<PersistedAppState>);
+      setIsHydratedFromStorage(true);
+      showJsonTransferStatus(`Importerte ${file.name}`);
+    } catch {
+      showJsonTransferStatus('Kunne ikke importere JSON-filen');
+    }
   };
 
   const handleStudentAssignmentsUpdated = (
@@ -717,7 +861,8 @@ function App() {
     setActiveDataTab('elever');
   };
 
-  const hasDataTabs = parsedFiles.length > 0 || mergedData.length > 0;
+  const hasImportSession = parsedFiles.length > 0 || mergedData.length > 0;
+  const hasLoadedData = mergedData.length > 0;
   const changeLogStudentCount = new Set(
     studentAssignmentChanges.map((change) => change.studentId || `${change.navn}|${change.klasse}`)
   ).size;
@@ -731,9 +876,8 @@ function App() {
             <p>Slå sammen fagvalg fra flere programområder og trinn</p>
           </header>
 
-        {hasDataTabs && (
           <>
-              {mergedData.length > 0 && (
+            {hasLoadedData && (
               <div className={`warning-box ${hasActiveWarnings ? '' : 'warning-box-clear'}`.trim()}>
                 <h3 
                   className={`collapsible-header warning-header ${hasActiveWarnings ? '' : 'warning-header-clear'}`.trim()}
@@ -945,94 +1089,196 @@ function App() {
             
             <div className="control-row-group">
               <div className="control-row-label">Visning</div>
-              <div className="data-tabs" role="tablist" aria-label="Data visning">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'import'}
-                  className={`data-tab ${activeDataTab === 'import' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('import')}
-                >
-                  Last inn data
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'subjects' || activeDataTab === 'groups'}
-                  className={`data-tab ${activeDataTab === 'subjects' || activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab(activeGroupTab)}
-                >
-                  Grupper
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'elever'}
-                  className={`data-tab ${activeDataTab === 'elever' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('elever')}
-                >
-                  Elever
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'balancing'}
-                  className={`data-tab ${activeDataTab === 'balancing' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('balancing')}
-                >
-                  Balansering
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'changelog'}
-                  className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('changelog')}
-                >
-                  Endringslogg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'students'}
-                  className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('students')}
-                >
-                  Elevtabell
-                </button>
-              </div>
-              {(activeDataTab === 'subjects' || activeDataTab === 'groups') && (
-                <div className="data-tabs data-subtabs" role="tablist" aria-label="Grupper visning">
+              <div className="data-tab-bar">
+                <div className="data-tabs" role="tablist" aria-label="Data visning">
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={activeDataTab === 'subjects'}
-                    className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
-                    onClick={() => {
-                      setActiveGroupTab('subjects');
-                      setActiveDataTab('subjects');
-                    }}
+                    aria-selected={activeDataTab === 'import'}
+                    className={`data-tab ${activeDataTab === 'import' ? 'data-tab-active' : ''}`.trim()}
+                    onClick={() => setActiveDataTab('import')}
                   >
-                    Blokkoversikt
+                    Last inn data
                   </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeDataTab === 'groups'}
-                    className={`data-tab ${activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
-                    onClick={() => {
-                      setActiveGroupTab('groups');
-                      setActiveDataTab('groups');
-                    }}
-                  >
-                    Gruppeoversikt
-                  </button>
+                  {hasLoadedData && (
+                    <>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeDataTab === 'subjects' || activeDataTab === 'groups'}
+                        className={`data-tab ${activeDataTab === 'subjects' || activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
+                        onClick={() => setActiveDataTab(activeGroupTab)}
+                      >
+                        Grupper
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeDataTab === 'elever' || activeDataTab === 'students'}
+                        className={`data-tab ${activeDataTab === 'elever' || activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
+                        onClick={() => setActiveDataTab(activeStudentTab)}
+                      >
+                        Elever
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeDataTab === 'balancing'}
+                        className={`data-tab ${activeDataTab === 'balancing' ? 'data-tab-active' : ''}`.trim()}
+                        onClick={() => setActiveDataTab('balancing')}
+                      >
+                        Balansering
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeDataTab === 'export'}
+                        className={`data-tab ${activeDataTab === 'export' ? 'data-tab-active' : ''}`.trim()}
+                        onClick={() => setActiveDataTab('export')}
+                      >
+                        Eksporter
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeDataTab === 'changelog'}
+                        className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
+                        onClick={() => setActiveDataTab('changelog')}
+                      >
+                        Endringslogg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
+                      </button>
+                    </>
+                  )}
                 </div>
-              )}
+                <div className="data-tab-actions">
+                  <div className="tabline-menu" ref={studentExportMenuRef}>
+                    <button
+                      type="button"
+                      className="export-btn tabline-action-btn"
+                      disabled={!hasLoadedData}
+                      onClick={() => setIsStudentExportMenuOpen((prev) => !prev)}
+                      aria-expanded={isStudentExportMenuOpen}
+                      aria-haspopup="menu"
+                      title={hasLoadedData ? 'Eksporter elevliste i valgt format' : 'Last inn data først'}
+                    >
+                      Eksporter elevliste {isStudentExportMenuOpen ? '▲' : '▼'}
+                    </button>
+                    {isStudentExportMenuOpen && hasLoadedData && (
+                      <div className="tabline-menu-popover" role="menu" aria-label="Eksporter elevliste">
+                        <button
+                          type="button"
+                          className="tabline-menu-item"
+                          role="menuitem"
+                          onClick={() => handleStudentListExport('excel-full')}
+                        >
+                          Eksporter til Excel (full)
+                        </button>
+                        <button
+                          type="button"
+                          className="tabline-menu-item"
+                          role="menuitem"
+                          onClick={() => handleStudentListExport('novaschem')}
+                        >
+                          Eksporter til Novaschem (.xlsx)
+                        </button>
+                        <button
+                          type="button"
+                          className="tabline-menu-item"
+                          role="menuitem"
+                          onClick={() => handleStudentListExport('txt')}
+                        >
+                          Eksporter til Novaschem (.txt)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="export-btn tabline-action-btn"
+                    disabled={!hasImportSession}
+                    onClick={handleExportJson}
+                    title={hasImportSession ? 'Eksporter arbeidsdata til JSON' : 'Last inn eller importer data først'}
+                  >
+                    Eksporter .JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="export-btn tabline-action-btn"
+                    onClick={handleImportJsonClick}
+                    title="Importer arbeidsdata fra JSON"
+                  >
+                    Importer .JSON
+                  </button>
+                  {jsonTransferStatus && <span className="tabline-status">{jsonTransferStatus}</span>}
+                  <input
+                    ref={jsonImportInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="visually-hidden"
+                    onChange={handleImportJson}
+                  />
+                </div>
+              </div>
+              {hasLoadedData && (activeDataTab === 'subjects' || activeDataTab === 'groups') && (
+                  <div className="data-tabs data-subtabs" role="tablist" aria-label="Grupper visning">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDataTab === 'subjects'}
+                      className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
+                      onClick={() => {
+                        setActiveGroupTab('subjects');
+                        setActiveDataTab('subjects');
+                      }}
+                    >
+                      Blokkoversikt
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDataTab === 'groups'}
+                      className={`data-tab ${activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
+                      onClick={() => {
+                        setActiveGroupTab('groups');
+                        setActiveDataTab('groups');
+                      }}
+                    >
+                      Gruppeoversikt
+                    </button>
+                  </div>
+                )}
+              {hasLoadedData && (activeDataTab === 'elever' || activeDataTab === 'students') && (
+                  <div className="data-tabs data-subtabs" role="tablist" aria-label="Elever visning">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDataTab === 'elever'}
+                      className={`data-tab ${activeDataTab === 'elever' ? 'data-tab-active' : ''}`.trim()}
+                      onClick={() => {
+                        setActiveStudentTab('elever');
+                        setActiveDataTab('elever');
+                      }}
+                    >
+                      Elevoversikt
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDataTab === 'students'}
+                      className={`data-tab ${activeDataTab === 'students' ? 'data-tab-active' : ''}`.trim()}
+                      onClick={() => {
+                        setActiveStudentTab('students');
+                        setActiveDataTab('students');
+                      }}
+                    >
+                      Elevtabell
+                    </button>
+                  </div>
+                )}
             </div>
 
             <div className="data-tab-panel">
-              {activeDataTab === 'import' ? (
+              {!hasLoadedData || activeDataTab === 'import' ? (
                 <>
                   <FileUploader onFilesAdded={handleFilesAdded} />
 
@@ -1083,30 +1329,6 @@ function App() {
                     <button onClick={handleClearStoredData} className="clear-storage-btn">
                       Tøm data
                     </button>
-                    <button
-                      onClick={handleExport}
-                      className="export-btn"
-                      disabled={mergedData.length === 0}
-                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter sammenslått data'}
-                    >
-                      Eksporter til Novaschem
-                    </button>
-                    <button
-                      onClick={handleExportDetailed}
-                      className="export-btn"
-                      disabled={mergedData.length === 0}
-                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter med separate blokk-kolonner og fullstendige fagnavn'}
-                    >
-                      Eksporter til Excel (full)
-                    </button>
-                    <button
-                      onClick={handleExportText}
-                      className="export-btn"
-                      disabled={mergedData.length === 0}
-                      title={mergedData.length === 0 ? 'Slå sammen data først' : 'Eksporter som tabulatorseparert tekstfil med fagnummer'}
-                    >
-                      Eksporter til TXT
-                    </button>
                   </div>
                 </>
               ) : activeDataTab === 'subjects' ? (
@@ -1145,6 +1367,30 @@ function App() {
                   onRestrictionsChange={setClassBlockRestrictions}
                   onApplyResult={handleApplyBalancingResult}
                 />
+              ) : activeDataTab === 'export' ? (
+                <div className="action-buttons">
+                  <button
+                    onClick={handleExportDetailed}
+                    className="export-btn"
+                    title="Eksporter med separate blokk-kolonner og fullstendige fagnavn"
+                  >
+                    Eksporter til Excel (full)
+                  </button>
+                  <button
+                    onClick={handleExport}
+                    className="export-btn"
+                    title="Eksporter sammenslått data som Excel-fil"
+                  >
+                    Eksporter til Novaschem (.xlsx)
+                  </button>
+                  <button
+                    onClick={handleExportText}
+                    className="export-btn"
+                    title="Eksporter som tabulatorseparert tekstfil med fagnummer"
+                  >
+                    Eksporter til Novaschem (.txt)
+                  </button>
+                </div>
               ) : activeDataTab === 'students' ? (
                 <MergedDataView
                   data={filteredMergedData}
@@ -1232,13 +1478,6 @@ function App() {
               </div>
             )}
           </>
-        )}
-
-        {!hasDataTabs && (
-          <div className="data-tab-panel">
-            <FileUploader onFilesAdded={handleFilesAdded} />
-          </div>
-        )}
         </div>
       </main>
     </div>

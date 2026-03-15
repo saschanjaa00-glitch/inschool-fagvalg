@@ -69,6 +69,32 @@ interface DeleteGroupConfirmState {
   studentIds: string[];
 }
 
+interface PdfGroupCell {
+  count: number;
+  enabled: boolean;
+  overfilled: boolean;
+}
+
+const getPdfGroupColumnCount = (groupCount: number): number => {
+  if (groupCount <= 1) {
+    return 1;
+  }
+
+  if (groupCount === 2 || groupCount === 4) {
+    return 2;
+  }
+
+  return 3;
+};
+
+const getPdfGroupRowCount = (groupCount: number): number => {
+  if (groupCount <= 0) {
+    return 1;
+  }
+
+  return Math.ceil(groupCount / getPdfGroupColumnCount(groupCount));
+};
+
 const parseSubjects = (value: string | null): string[] => {
   if (!value) {
     return [];
@@ -396,6 +422,223 @@ export const SubjectTally = ({
     XLSX.writeFile(workbook, 'subject_tally.xlsx');
   };
 
+  const exportPdf = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    const docWithTables = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Blokkoversikt', margin, margin);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(new Date().toLocaleString('nb-NO'), pageWidth - margin, margin, { align: 'right' });
+
+    const pdfRows = subjectRows.map((row) => {
+      const blockGroups = BLOKK_LABELS.reduce((acc, blokkLabel) => {
+        acc[blokkLabel] = row.groupsByTarget[blokkLabel]
+          .filter(shouldShowGroup)
+          .map((entry) => ({
+            count: entry.allocatedCount,
+            enabled: entry.enabled,
+            overfilled: entry.overfilled,
+          }));
+        return acc;
+      }, {} as Record<BlokkLabel, PdfGroupCell[]>);
+
+      const lineCount = Math.max(
+        1,
+        ...BLOKK_LABELS.map((blokkLabel) => getPdfGroupRowCount(blockGroups[blokkLabel].length))
+      );
+      const spacer = Array.from({ length: lineCount }, () => ' ').join('\n');
+
+      return {
+        subject: row.item.subject,
+        blokk1: spacer,
+        blokk2: spacer,
+        blokk3: spacer,
+        blokk4: spacer,
+        total: String(row.activeTotal),
+        blockGroups,
+      };
+    });
+
+    autoTable(doc, {
+      startY: margin + 18,
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 9,
+        cellPadding: 6,
+        lineColor: [220, 226, 234],
+        lineWidth: 0.6,
+        textColor: [34, 34, 34],
+        valign: 'middle',
+      },
+      headStyles: {
+        fillColor: [240, 240, 240],
+        textColor: [34, 34, 34],
+        fontStyle: 'bold',
+        halign: 'center',
+      },
+      columnStyles: {
+        subject: { cellWidth: 190, halign: 'left' },
+        blokk1: { cellWidth: 120, halign: 'center' },
+        blokk2: { cellWidth: 120, halign: 'center' },
+        blokk3: { cellWidth: 120, halign: 'center' },
+        blokk4: { cellWidth: 120, halign: 'center' },
+        total: { cellWidth: 65, halign: 'center', fontStyle: 'bold' },
+      },
+      columns: [
+        { header: 'Fag', dataKey: 'subject' },
+        { header: 'Blokk 1', dataKey: 'blokk1' },
+        { header: 'Blokk 2', dataKey: 'blokk2' },
+        { header: 'Blokk 3', dataKey: 'blokk3' },
+        { header: 'Blokk 4', dataKey: 'blokk4' },
+        { header: 'Totalt', dataKey: 'total' },
+      ],
+      body: pdfRows.map((row) => [
+        row.subject,
+        row.blokk1,
+        row.blokk2,
+        row.blokk3,
+        row.blokk4,
+        row.total,
+      ]),
+      didDrawCell: (data) => {
+        if (data.section !== 'body') {
+          return;
+        }
+
+        const dataKey = String(data.column.dataKey);
+        const blokkLabel = (`Blokk ${dataKey.slice(-1)}`) as BlokkLabel;
+
+        if (!['blokk1', 'blokk2', 'blokk3', 'blokk4'].includes(dataKey)) {
+          return;
+        }
+
+        const groups = pdfRows[data.row.index]?.blockGroups[blokkLabel];
+        if (!groups || groups.length === 0) {
+          return;
+        }
+
+        const cols = getPdfGroupColumnCount(groups.length);
+        const rows = getPdfGroupRowCount(groups.length);
+        const gap = 4;
+        const horizontalPadding = 8;
+        const verticalPadding = 6;
+        const availableWidth = data.cell.width - (horizontalPadding * 2) - (gap * (cols - 1));
+        const availableHeight = data.cell.height - (verticalPadding * 2) - (gap * (rows - 1));
+        const boxWidth = Math.max(20, Math.min(32, availableWidth / cols));
+        const boxHeight = Math.max(16, Math.min(20, availableHeight / rows));
+        const contentWidth = (boxWidth * cols) + (gap * (cols - 1));
+        const contentHeight = (boxHeight * rows) + (gap * (rows - 1));
+        const startX = data.cell.x + ((data.cell.width - contentWidth) / 2);
+        const startY = data.cell.y + ((data.cell.height - contentHeight) / 2);
+
+        groups.forEach((group, index) => {
+          const columnIndex = index % cols;
+          const rowIndex = Math.floor(index / cols);
+          const x = startX + (columnIndex * (boxWidth + gap));
+          const y = startY + (rowIndex * (boxHeight + gap));
+
+          doc.setFillColor(group.enabled ? 245 : 250, group.enabled ? 248 : 250, group.enabled ? 252 : 250);
+          doc.setDrawColor(group.overfilled ? 187 : 180, group.overfilled ? 74 : 187, group.overfilled ? 74 : 197);
+          doc.roundedRect(x, y, boxWidth, boxHeight, 4, 4, 'FD');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9);
+          doc.setTextColor(34, 34, 34);
+          doc.text(String(group.count), x + (boxWidth / 2), y + (boxHeight / 2) + 3, { align: 'center' });
+        });
+
+        doc.setFont('helvetica', 'normal');
+      },
+    });
+
+    let nextY = (docWithTables.lastAutoTable?.finalY || margin + 18) + 24;
+    const ensurePageSpace = (requiredHeight: number) => {
+      if (nextY + requiredHeight <= pageHeight - margin) {
+        return;
+      }
+
+      doc.addPage();
+      nextY = margin;
+    };
+
+    ensurePageSpace(120);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Matematikkvalg', margin, nextY);
+    autoTable(doc, {
+      startY: nextY + 8,
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 9,
+        cellPadding: 6,
+        lineColor: [220, 226, 234],
+        lineWidth: 0.6,
+        textColor: [34, 34, 34],
+      },
+      headStyles: {
+        fillColor: [240, 240, 240],
+        textColor: [34, 34, 34],
+        fontStyle: 'bold',
+      },
+      columnStyles: {
+        count: { cellWidth: 90, halign: 'center' },
+      },
+      columns: [
+        { header: 'Fag', dataKey: 'label' },
+        { header: 'Antall', dataKey: 'count' },
+      ],
+      body: mathOptionRows.map((row) => ({ label: row.label, count: String(row.count) })),
+    });
+
+    nextY = (docWithTables.lastAutoTable?.finalY || nextY) + 24;
+    ensurePageSpace(140);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Fremmedspråkvalg', margin, nextY);
+    autoTable(doc, {
+      startY: nextY + 8,
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 9,
+        cellPadding: 6,
+        lineColor: [220, 226, 234],
+        lineWidth: 0.6,
+        textColor: [34, 34, 34],
+      },
+      headStyles: {
+        fillColor: [240, 240, 240],
+        textColor: [34, 34, 34],
+        fontStyle: 'bold',
+      },
+      columnStyles: {
+        count: { cellWidth: 90, halign: 'center' },
+      },
+      columns: [
+        { header: 'Fag', dataKey: 'label' },
+        { header: 'Antall', dataKey: 'count' },
+      ],
+      body: (foreignLanguageRows.length > 0 ? foreignLanguageRows : [{ label: 'Ingen registrerte valg', count: 0, students: [] }]).map((row) => ({
+        label: row.label,
+        count: String(row.count),
+      })),
+    });
+
+    doc.save('blokkoversikt.pdf');
+  };
+
   const exportStudentList = async (subject: string) => {
     const XLSX = await loadXlsx();
 
@@ -630,7 +873,14 @@ export const SubjectTally = ({
           onClick={exportTable}
           title="Eksporter fagoversiktstabell"
         >
-          Eksport tabell
+          Eksporter tabell
+        </button>
+        <button
+          className={styles.exportTableBtn}
+          onClick={() => { void exportPdf(); }}
+          title="Eksporter blokkoversikt som PDF"
+        >
+          Eksporter PDF
         </button>
         <button
           className={styles.settingsBtn}
@@ -789,10 +1039,14 @@ export const SubjectTally = ({
 
       <h4 className={styles.subSectionTitle}>Matematikkvalg</h4>
       <table className={styles.mathTable}>
+        <colgroup>
+          <col />
+          <col className={styles.mathCountColumn} />
+        </colgroup>
         <thead>
           <tr>
             <th>Fag</th>
-            <th>Antall</th>
+            <th className={styles.mathCountHeader}>Antall</th>
           </tr>
         </thead>
         <tbody>
@@ -844,10 +1098,14 @@ export const SubjectTally = ({
 
       <h4 className={styles.subSectionTitle}>Fremmedspråkvalg</h4>
       <table className={styles.mathTable}>
+        <colgroup>
+          <col />
+          <col className={styles.mathCountColumn} />
+        </colgroup>
         <thead>
           <tr>
             <th>Fag</th>
-            <th>Antall</th>
+            <th className={styles.mathCountHeader}>Antall</th>
           </tr>
         </thead>
         <tbody>
