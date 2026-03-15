@@ -116,6 +116,7 @@ function App() {
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
   const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
   const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const [jsonTransferStatus, setJsonTransferStatus] = useState('');
   const [isStudentExportMenuOpen, setIsStudentExportMenuOpen] = useState(false);
   const persistTimeoutRef = useRef<number | null>(null);
@@ -341,6 +342,24 @@ function App() {
       document.removeEventListener('mousedown', handleDocumentClick);
     };
   }, [isStudentExportMenuOpen]);
+
+  useEffect(() => {
+    if (!showHelpModal) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowHelpModal(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showHelpModal]);
 
   useEffect(() => {
     try {
@@ -1028,7 +1047,18 @@ function App() {
       <main className="main">
         <div className="content-container">
           <header className="header">
-            <h1>Fagvalg - Oversikt og balanseringsverktøy</h1>
+            <div className="header-title-row">
+              <h1>Fagvalg - Oversikt og balanseringsverktøy</h1>
+              <button
+                type="button"
+                className="header-help-btn"
+                onClick={() => setShowHelpModal(true)}
+                aria-haspopup="dialog"
+                aria-expanded={showHelpModal}
+              >
+                Hjelp
+              </button>
+            </div>
             <p>Laget av Sascha Njaa Tjelta</p>
           </header>
 
@@ -1576,6 +1606,98 @@ function App() {
                 />
               )}
             </div>
+
+            {showHelpModal && (
+              <div className="app-modal-overlay" onClick={() => setShowHelpModal(false)}>
+                <div
+                  className="app-help-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="help-modal-title"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="app-help-header">
+                    <h3 id="help-modal-title">Hjelp - Slik bruker du verktøyet</h3>
+                    <button
+                      type="button"
+                      className="app-help-close"
+                      onClick={() => setShowHelpModal(false)}
+                      aria-label="Lukk hjelp"
+                    >
+                      Lukk
+                    </button>
+                  </div>
+
+                  <div className="app-help-content">
+                    <section>
+                      <h4>1. Start med data</h4>
+                      <p>
+                        Gå til fanen <strong>Data</strong>. Last opp en eller flere filer. I <strong>Oppsett</strong> kan du sjekke at
+                        kolonner er riktig mappet (navn, klasse og blokker). Når alt ser riktig ut, trykk <strong>Last inn data</strong>.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>2. Se advarsler tidlig</h4>
+                      <p>
+                        Etter innlasting vises advarsler øverst. Her ser du elever med blokk-kollisjon, færre enn 3 fag,
+                        eller 4+ fag. Du kan eksportere advarsler, kopiere dem, og hoppe direkte til eleven i elevvisningen.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>3. Sett opp grupper i lineær flyt</h4>
+                      <p>
+                        Gå til <strong>Grupper</strong> og jobb først i <strong>Blokkoversikt</strong>: juster kapasitet, opprett eller fjern grupper,
+                        og kontroller fordeling per blokk. Bytt deretter til <strong>Gruppeoversikt</strong> for å finjustere flytting av elever
+                        mellom grupper med full oversikt over konsekvenser.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>4. Korriger elevdata</h4>
+                      <p>
+                        I <strong>Elever</strong> kan du redigere fag per elev, legge til nye elever, markere <strong>Fjerdeårs-elev</strong>,
+                        og følge elevens endringslogg. Manuelt lagt til elev fungerer videre i samme pipeline som importerte elever.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>5. Kjør balansering</h4>
+                      <p>
+                        I <strong>Balansering</strong> setter du tillatte blokkregler per trinn og eventuelle fag som skal holdes utenfor.
+                        Kjør balansering når gruppestrukturen er klar. Bruk diagnosefeltet for å se hva som ble forbedret,
+                        og kjør flere runder ved behov.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>6. Kontroller resultat i Logg</h4>
+                      <p>
+                        I <strong>Logg</strong> ser du detaljert eller oppsummert historikk per elev. Du kan søke på elevnavn og fag,
+                        og eksportere den filtrerte loggen til Word.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>7. Eksporter og del</h4>
+                      <p>
+                        Bruk knappen <strong>Eksporter elevliste</strong> for Excel/TXT. Bruk <strong>Eksporter .JSON</strong> for å lagre hele arbeidsøkten,
+                        slik at du eller kollegaer kan importere videre senere.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h4>Tips for trygg arbeidsflyt</h4>
+                      <p>
+                        Jobb i rekkefolgen Data, Grupper, Elever, Balansering, Logg og Eksport. Bruk angre/gjør om
+                        i topplinjen hvis du vil teste alternative valg uten å miste kontroll på prosessen.
+                      </p>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {showReloadConfirmModal && (
               <div

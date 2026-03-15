@@ -168,10 +168,39 @@
   color: #222;
 }
 
+.studentHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .studentHeader p {
   margin: 3px 0 8px;
   color: #666;
   font-size: 12px;
+}
+
+.fourthYearToggleButton {
+  padding: 5px 8px;
+  border: 1px solid #b8c7d8;
+  background: #f3f7fc;
+  color: #2f4e70;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fourthYearToggleButton:hover {
+  background: #e9f1fb;
+}
+
+.fourthYearToggleButtonActive {
+  border-color: #2f8b57;
+  background: #e8f8ee;
+  color: #1f663f;
 }
 
 .warningIgnorePanel {
@@ -581,6 +610,11 @@
 
   .studentList {
     max-height: 260px;
+  }
+
+  .studentHeader {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .modalOverlay {

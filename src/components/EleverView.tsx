@@ -1060,6 +1060,44 @@ export const EleverView = ({
     applyStatusMessage(`La til ${trimmedName}`);
   };
 
+  const handleToggleFourthYearStatus = () => {
+    if (!selectedStudentEntry) {
+      return;
+    }
+
+    const nextIsFourthYear = !selectedStudentEntry.student.fjerdearsElev;
+
+    const nextData = data.map((student, index) => {
+      const currentId = getStudentId(student, index);
+      if (currentId !== selectedStudentEntry.studentId) {
+        return student;
+      }
+
+      return {
+        ...student,
+        fjerdearsElev: nextIsFourthYear,
+      };
+    });
+
+    const change: StudentAssignmentChange = {
+      studentId: selectedStudentEntry.studentId,
+      navn: selectedStudentEntry.student.navn || 'Ukjent',
+      klasse: selectedStudentEntry.student.klasse || 'Ingen klasse',
+      subject: '',
+      fromBlokk: 0,
+      toBlokk: 0,
+      reason: nextIsFourthYear
+        ? 'Elever: markerte elev som Fjerdeårs-elev'
+        : 'Elever: fjernet Fjerdeårs-elev-markering',
+      changedAt: new Date().toISOString(),
+    };
+
+    onStudentDataUpdate(nextData, [change]);
+    applyStatusMessage(
+      nextIsFourthYear ? 'Elev markert som Fjerdeårs-elev' : 'Fjerdeårs-elev-markering fjernet'
+    );
+  };
+
   const openEditAssignment = (assignment: AssignmentEntry, rowKey: string) => {
     const subject = assignment.subject;
     const blokkNumber = assignment.blokkNumber;
@@ -1337,6 +1375,15 @@ export const EleverView = ({
                     {selectedStudentEntry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  className={`${styles.fourthYearToggleButton} ${selectedStudentEntry.student.fjerdearsElev ? styles.fourthYearToggleButtonActive : ''}`.trim()}
+                  onClick={handleToggleFourthYearStatus}
+                >
+                  {selectedStudentEntry.student.fjerdearsElev
+                    ? 'Fjern Fjerdeårs-elev status'
+                    : 'Sett som Fjerdeårs-elev - ignorer trinnrestriksjoner i balansering'}
+                </button>
               </div>
 
               {selectedWarningRows.length > 0 && (
