@@ -381,6 +381,12 @@
   font-weight: 600;
 }
 
+.modalLabelMeta {
+  margin-left: 6px;
+  font-weight: 500;
+  color: #6e7a88;
+}
+
 .modalActions {
   display: flex;
   justify-content: flex-end;
