@@ -109,6 +109,8 @@ export const BalanseringView = ({
   const [maxLookaheadAttempts, setMaxLookaheadAttempts] = useState(String(DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts));
   const [maxDepth2Chains, setMaxDepth2Chains] = useState(String(DEFAULT_BALANCING_CONFIG.maxDepth2Chains));
   const [excludedSubjects, setExcludedSubjects] = useState<string[]>(DEFAULT_BALANCING_CONFIG.excludedSubjects);
+  const [parametersExpanded, setParametersExpanded] = useState(false);
+  const [excludedSubjectsExpanded, setExcludedSubjectsExpanded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [lastResult, setLastResult] = useState<ProgressiveHybridBalanceResult | null>(null);
 
@@ -263,169 +265,194 @@ export const BalanseringView = ({
           </button>
         </div>
 
-        <div className={styles.weightsGrid}>
-          <label>
-            Overkapasitet (A)
-            <input
-              type="number"
-              value={weights.overcapA}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.overcapA}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, overcapA: parseInputNumber(event.target.value, prev.overcapA) }))
-              }
-            />
-          </label>
-          <label>
-            Ubalanse (B)
-            <input
-              type="number"
-              value={weights.imbalanceB}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.imbalanceB}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, imbalanceB: parseInputNumber(event.target.value, prev.imbalanceB) }))
-              }
-            />
-          </label>
-          <label>
-            Topptrykk (C)
-            <input
-              type="number"
-              value={weights.peakC}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.peakC}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, peakC: parseInputNumber(event.target.value, prev.peakC) }))
-              }
-            />
-          </label>
-          <label>
-            Kollisjon (D)
-            <input
-              type="number"
-              value={FIXED_COLLISION_WEIGHT}
-              step="1000"
-              disabled
-              title={SETTING_DESCRIPTIONS.collisionD}
-            />
-          </label>
-          <label>
-            Flyttkost (E)
-            <input
-              type="number"
-              value={weights.movesE}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.movesE}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, movesE: parseInputNumber(event.target.value, prev.movesE) }))
-              }
-            />
-          </label>
-          <label>
-            Repeatkost (F)
-            <input
-              type="number"
-              value={weights.repeatF}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.repeatF}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, repeatF: parseInputNumber(event.target.value, prev.repeatF) }))
-              }
-            />
-          </label>
-          <label>
-            Storgruppe-faktor (alpha)
-            <input
-              type="number"
-              value={weights.alpha}
-              step="0.01"
-              title={SETTING_DESCRIPTIONS.alpha}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, alpha: parseInputNumber(event.target.value, prev.alpha) }))
-              }
-            />
-          </label>
-          <label>
-            Peak-faktor (beta)
-            <input
-              type="number"
-              value={weights.beta}
-              step="0.1"
-              title={SETTING_DESCRIPTIONS.beta}
-              onChange={(event) =>
-                setWeights((prev) => ({ ...prev, beta: parseInputNumber(event.target.value, prev.beta) }))
-              }
-            />
-          </label>
-          <label>
-            Start under maks
-            <input
-              type="number"
-              value={maxRelaxation}
-              title={SETTING_DESCRIPTIONS.maxRelaxation}
-              onChange={(event) => setMaxRelaxation(event.target.value)}
-            />
-          </label>
-          <label>
-            Maks tid per pass (ms)
-            <input
-              type="number"
-              value={maxPassMillis}
-              title={SETTING_DESCRIPTIONS.maxPassMillis}
-              onChange={(event) => setMaxPassMillis(event.target.value)}
-            />
-          </label>
-          <label>
-            Lookahead-forsok
-            <input
-              type="number"
-              value={maxLookaheadAttempts}
-              title={SETTING_DESCRIPTIONS.maxLookaheadAttempts}
-              onChange={(event) => setMaxLookaheadAttempts(event.target.value)}
-            />
-          </label>
-          <label>
-            Max depth-2 kjeder
-            <input
-              type="number"
-              value={maxDepth2Chains}
-              title={SETTING_DESCRIPTIONS.maxDepth2Chains}
-              onChange={(event) => setMaxDepth2Chains(event.target.value)}
-            />
-          </label>
+        <div className={styles.constraintsBox}>
+          <button
+            type="button"
+            className={styles.collapsibleHeaderBtn}
+            onClick={() => setParametersExpanded((prev) => !prev)}
+            aria-expanded={parametersExpanded}
+          >
+            <span className={styles.chevron}>{parametersExpanded ? '▼' : '▶'}</span>
+            <span>Parametere</span>
+          </button>
+
+          {parametersExpanded && (
+            <div className={styles.weightsGrid}>
+              <label>
+                Overkapasitet (A)
+                <input
+                  type="number"
+                  value={weights.overcapA}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.overcapA}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, overcapA: parseInputNumber(event.target.value, prev.overcapA) }))
+                  }
+                />
+              </label>
+              <label>
+                Ubalanse (B)
+                <input
+                  type="number"
+                  value={weights.imbalanceB}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.imbalanceB}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, imbalanceB: parseInputNumber(event.target.value, prev.imbalanceB) }))
+                  }
+                />
+              </label>
+              <label>
+                Topptrykk (C)
+                <input
+                  type="number"
+                  value={weights.peakC}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.peakC}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, peakC: parseInputNumber(event.target.value, prev.peakC) }))
+                  }
+                />
+              </label>
+              <label>
+                Kollisjon (D)
+                <input
+                  type="number"
+                  value={FIXED_COLLISION_WEIGHT}
+                  step="1000"
+                  disabled
+                  title={SETTING_DESCRIPTIONS.collisionD}
+                />
+              </label>
+              <label>
+                Flyttkost (E)
+                <input
+                  type="number"
+                  value={weights.movesE}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.movesE}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, movesE: parseInputNumber(event.target.value, prev.movesE) }))
+                  }
+                />
+              </label>
+              <label>
+                Repeatkost (F)
+                <input
+                  type="number"
+                  value={weights.repeatF}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.repeatF}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, repeatF: parseInputNumber(event.target.value, prev.repeatF) }))
+                  }
+                />
+              </label>
+              <label>
+                Storgruppe-faktor (alpha)
+                <input
+                  type="number"
+                  value={weights.alpha}
+                  step="0.01"
+                  title={SETTING_DESCRIPTIONS.alpha}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, alpha: parseInputNumber(event.target.value, prev.alpha) }))
+                  }
+                />
+              </label>
+              <label>
+                Peak-faktor (beta)
+                <input
+                  type="number"
+                  value={weights.beta}
+                  step="0.1"
+                  title={SETTING_DESCRIPTIONS.beta}
+                  onChange={(event) =>
+                    setWeights((prev) => ({ ...prev, beta: parseInputNumber(event.target.value, prev.beta) }))
+                  }
+                />
+              </label>
+              <label>
+                Start under maks
+                <input
+                  type="number"
+                  value={maxRelaxation}
+                  title={SETTING_DESCRIPTIONS.maxRelaxation}
+                  onChange={(event) => setMaxRelaxation(event.target.value)}
+                />
+              </label>
+              <label>
+                Maks tid per pass (ms)
+                <input
+                  type="number"
+                  value={maxPassMillis}
+                  title={SETTING_DESCRIPTIONS.maxPassMillis}
+                  onChange={(event) => setMaxPassMillis(event.target.value)}
+                />
+              </label>
+              <label>
+                Lookahead-forsok
+                <input
+                  type="number"
+                  value={maxLookaheadAttempts}
+                  title={SETTING_DESCRIPTIONS.maxLookaheadAttempts}
+                  onChange={(event) => setMaxLookaheadAttempts(event.target.value)}
+                />
+              </label>
+              <label>
+                Max depth-2 kjeder
+                <input
+                  type="number"
+                  value={maxDepth2Chains}
+                  title={SETTING_DESCRIPTIONS.maxDepth2Chains}
+                  onChange={(event) => setMaxDepth2Chains(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {availableSubjects.length > 0 && (
           <div className={styles.constraintsBox}>
-            <div className={styles.subjectExclusionHeader}>
-              <div>
-                <h4>Utelukk fag fra balansering</h4>
-                <p title={SETTING_DESCRIPTIONS.excludedSubjects}>
-                  Utelukkede fag blir ikke flyttet og teller ikke med i score, overkapasitet eller fagmetrikker.
-                </p>
-              </div>
-              <button type="button" className={styles.secondaryBtn} onClick={clearExcludedSubjects}>
-                Nullstill fagvalg
-              </button>
-            </div>
+            <button
+              type="button"
+              className={styles.collapsibleHeaderBtn}
+              onClick={() => setExcludedSubjectsExpanded((prev) => !prev)}
+              aria-expanded={excludedSubjectsExpanded}
+            >
+              <span className={styles.chevron}>{excludedSubjectsExpanded ? '▼' : '▶'}</span>
+              <span>Utelukk fag fra balansering</span>
+            </button>
 
-            <div className={styles.subjectExclusionList}>
-              {availableSubjects.map((subject) => {
-                const isExcluded = excludedSubjects.includes(subject);
-                return (
-                  <label key={subject} className={styles.subjectToggle}>
-                    <input
-                      type="checkbox"
-                      checked={isExcluded}
-                      title={SETTING_DESCRIPTIONS.excludedSubjects}
-                      onChange={(event) => toggleExcludedSubject(subject, event.target.checked)}
-                    />
-                    <span>{subject}</span>
-                  </label>
-                );
-              })}
-            </div>
+            {excludedSubjectsExpanded && (
+              <>
+                <div className={styles.subjectExclusionHeader}>
+                  <p title={SETTING_DESCRIPTIONS.excludedSubjects}>
+                    Utelukkede fag blir ikke flyttet og teller ikke med i score, overkapasitet eller fagmetrikker.
+                  </p>
+                  <button type="button" className={styles.secondaryBtn} onClick={clearExcludedSubjects}>
+                    Nullstill fagvalg
+                  </button>
+                </div>
+
+                <div className={styles.subjectExclusionList}>
+                  {availableSubjects.map((subject) => {
+                    const isExcluded = excludedSubjects.includes(subject);
+                    return (
+                      <label key={subject} className={styles.subjectToggle}>
+                        <input
+                          type="checkbox"
+                          checked={isExcluded}
+                          title={SETTING_DESCRIPTIONS.excludedSubjects}
+                          onChange={(event) => toggleExcludedSubject(subject, event.target.checked)}
+                        />
+                        <span>{subject}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 

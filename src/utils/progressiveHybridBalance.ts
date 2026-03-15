@@ -221,7 +221,7 @@ export const DEFAULT_BALANCING_CONFIG: BalancingConfig = {
   maxLookaheadAttempts: 300,
   maxDepth2Chains: 150,
   classBlockRestrictions: DEFAULT_CLASS_BLOCK_RESTRICTIONS,
-  excludedSubjects: [],
+  excludedSubjects: ['Toppidrett 2', 'Toppidrett 3'],
   lockedAssignmentKeys: [],
 };
 
@@ -767,7 +767,8 @@ const moveIsFeasible = (
   state: InternalState,
   move: CandidateMove,
   offset: number,
-  restrictions: ClassBlockRestrictions
+  restrictions: ClassBlockRestrictions,
+  ignoreCapacity: boolean = false
 ): boolean => {
   const student = state.students.get(move.studentId);
   if (!student) {
@@ -801,10 +802,12 @@ const moveIsFeasible = (
     return false;
   }
 
-  // Offset>0 temporarily lowers usable capacity. Offset=0 is the real group max.
-  const effectiveCapacity = getEffectiveCapacity(targetGroup.capacity, offset);
-  if (targetGroup.size + 1 > effectiveCapacity) {
-    return false;
+  if (!ignoreCapacity) {
+    // Offset>0 temporarily lowers usable capacity. Offset=0 is the real group max.
+    const effectiveCapacity = getEffectiveCapacity(targetGroup.capacity, offset);
+    if (targetGroup.size + 1 > effectiveCapacity) {
+      return false;
+    }
   }
 
   return true;
@@ -817,9 +820,10 @@ const applyCandidateMoveToState = (
   scoreDelta: number,
   offset: number,
   restrictions: ClassBlockRestrictions,
-  chainStep?: number
+  chainStep?: number,
+  ignoreCapacity: boolean = false
 ): boolean => {
-  if (!moveIsFeasible(state, move, offset, restrictions)) {
+  if (!moveIsFeasible(state, move, offset, restrictions, ignoreCapacity)) {
     return false;
   }
 
@@ -1025,16 +1029,17 @@ const estimateMoveDelta = (
   move: CandidateMove,
   config: BalancingConfig,
   reason: MoveRecord['reason'],
-  offset: number
+  offset: number,
+  ignoreCapacity: boolean = false
 ): number => {
-  if (!moveIsFeasible(state, move, offset, config.classBlockRestrictions)) {
+  if (!moveIsFeasible(state, move, offset, config.classBlockRestrictions, ignoreCapacity)) {
     return Number.POSITIVE_INFINITY;
   }
 
   const excludedSubjects = toExcludedSubjectSet(config.excludedSubjects);
   const before = computeScore(state, config.weights, state.history, excludedSubjects).total;
   const cloned = cloneState(state);
-  const applied = applyCandidateMoveToState(cloned, move, reason, 0, offset, config.classBlockRestrictions);
+  const applied = applyCandidateMoveToState(cloned, move, reason, 0, offset, config.classBlockRestrictions, undefined, ignoreCapacity);
   if (!applied) {
     return Number.POSITIVE_INFINITY;
   }
@@ -1646,7 +1651,73 @@ const scoreFallbackCollisionMove = (
   config: BalancingConfig,
   candidate: CandidateMove
 ): number => {
-  return estimateMoveDelta(state, candidate, config, 'collision-fix', 0);
+  return estimateMoveDelta(state, candidate, config, 'collision-fix', 0, true);
+};
+
+// Build all feasible single moves for a student in the current state (ignoring capacity).
+// Each entry is tagged `directFix=true` when the move takes a subject out of a colliding
+// block and into a block that is currently free for the student — i.e. it immediately
+// reduces the collision count by 1.
+const buildStudentCollisionMoves = (
+  state: InternalState,
+  studentId: string,
+  config: BalancingConfig
+): Array<{ candidate: CandidateMove; score: number; directFix: boolean }> => {
+  const student = state.students.get(studentId);
+  if (!student) {
+    return [];
+  }
+
+  const result: Array<{ candidate: CandidateMove; score: number; directFix: boolean }> = [];
+
+  student.assignments.forEach((assignment) => {
+    if (assignment.locked) {
+      return;
+    }
+
+    const subjectGroups = state.groupsBySubject.get(assignment.subjectCode) || [];
+    const sourceGroup = subjectGroups.find((group) => group.groupId === assignment.groupId);
+    if (!sourceGroup) {
+      return;
+    }
+
+    const sourceColliding = student.assignments.filter((a) => a.block === assignment.block).length > 1;
+
+    subjectGroups
+      .filter((group) => group.groupId !== sourceGroup.groupId && group.block !== sourceGroup.block)
+      .forEach((target) => {
+        const candidate: CandidateMove = {
+          studentId: student.id,
+          subjectCode: assignment.subjectCode,
+          subjectName: assignment.subjectName,
+          fromGroupId: sourceGroup.groupId,
+          fromGroupCode: sourceGroup.groupCode,
+          fromBlock: sourceGroup.block,
+          toGroupId: target.groupId,
+          toGroupCode: target.groupCode,
+          toBlock: target.block,
+          estimatedScoreDelta: 0,
+          priorityTag: 'equalize' as const,
+        };
+
+        if (!moveIsFeasible(state, candidate, 0, config.classBlockRestrictions, true)) {
+          return;
+        }
+
+        const targetFree = !student.assignments.some(
+          (a) => a.block === target.block && a.subjectCode !== assignment.subjectCode
+        );
+        const directFix = sourceColliding && targetFree;
+        const score = scoreFallbackCollisionMove(state, config, candidate);
+
+        if (Number.isFinite(score)) {
+          result.push({ candidate, score, directFix });
+        }
+      });
+  });
+
+  result.sort((left, right) => left.score - right.score);
+  return result;
 };
 
 export const repairCollisions = (
@@ -1659,68 +1730,133 @@ export const repairCollisions = (
   const students = Array.from(state.students.values()).sort((left, right) => left.id.localeCompare(right.id));
 
   students.forEach((student) => {
-    const byBlock = new Map<BlockNumber, AssignmentNode[]>();
-    student.assignments.forEach((assignment) => {
-      const entries = byBlock.get(assignment.block) || [];
+    let madeProgress = true;
+
+    while (madeProgress) {
+      madeProgress = false;
+
+      const current = state.students.get(student.id);
+      if (!current || getCollisionCount(current) === 0) {
+        break;
+      }
+
+      const moves = buildStudentCollisionMoves(state, student.id, config);
+
+      // ── Step 1: direct fix — move a subject out of a colliding block into a free block ──
+      const directFix = moves.find((m) => m.directFix);
+      if (directFix) {
+        const success = applyCandidateMoveToState(
+          state,
+          directFix.candidate,
+          'collision-fix',
+          directFix.score,
+          0,
+          config.classBlockRestrictions,
+          undefined,
+          true
+        );
+        if (success) {
+          applied.push(state.history[state.history.length - 1]);
+          madeProgress = true;
+          // restart the while loop to re-evaluate collisions
+        }
+        continue;
+      }
+
+      // ── Step 2: 2-step lookahead ──
+      // No single move resolves the collision directly (e.g. every free block is occupied
+      // by another subject that could be moved elsewhere first).
+      // Try every feasible move for this student; if applying it to a snapshot enables a
+      // direct fix, commit both moves to the real state.
+      let foundTwoStep = false;
+      for (const { candidate: firstCandidate } of moves) {
+        const snapshot = cloneState(state);
+        const firstApplied = applyCandidateMoveToState(
+          snapshot,
+          firstCandidate,
+          'collision-fix',
+          0,
+          0,
+          config.classBlockRestrictions,
+          undefined,
+          true
+        );
+        if (!firstApplied) {
+          continue;
+        }
+
+        // Check whether a direct fix is now available in the snapshot
+        const snapshotMoves = buildStudentCollisionMoves(snapshot, student.id, config);
+        const snapshotDirectFix = snapshotMoves.find((m) => m.directFix);
+
+        if (!snapshotDirectFix) {
+          continue;
+        }
+
+        // Commit first move to the real state
+        const firstScore = scoreFallbackCollisionMove(state, config, firstCandidate);
+        const committed1 = applyCandidateMoveToState(
+          state,
+          firstCandidate,
+          'collision-fix',
+          Number.isFinite(firstScore) ? firstScore : 0,
+          0,
+          config.classBlockRestrictions,
+          undefined,
+          true
+        );
+
+        if (!committed1) {
+          continue;
+        }
+
+        applied.push(state.history[state.history.length - 1]);
+
+        // Commit second move to the real state (re-score against updated state)
+        const secondScore = scoreFallbackCollisionMove(state, config, snapshotDirectFix.candidate);
+        const committed2 = applyCandidateMoveToState(
+          state,
+          snapshotDirectFix.candidate,
+          'collision-fix',
+          Number.isFinite(secondScore) ? secondScore : 0,
+          0,
+          config.classBlockRestrictions,
+          undefined,
+          true
+        );
+
+        if (committed2) {
+          applied.push(state.history[state.history.length - 1]);
+        }
+
+        madeProgress = true;
+        foundTwoStep = true;
+        break;
+      }
+
+      if (!foundTwoStep) {
+        break;
+      }
+    }
+
+    // Report any collisions that are genuinely unresolvable.
+    const finalStudent = state.students.get(student.id);
+    if (!finalStudent) {
+      return;
+    }
+
+    const finalByBlock = new Map<BlockNumber, AssignmentNode[]>();
+    finalStudent.assignments.forEach((assignment) => {
+      const entries = finalByBlock.get(assignment.block) || [];
       entries.push(assignment);
-      byBlock.set(assignment.block, entries);
+      finalByBlock.set(assignment.block, entries);
     });
 
-    byBlock.forEach((assignmentsInBlock) => {
+    finalByBlock.forEach((assignmentsInBlock) => {
       if (assignmentsInBlock.length <= 1) {
         return;
       }
-
-      const toMove = assignmentsInBlock.slice(1);
-
-      toMove.forEach((assignment) => {
-        const subjectGroups = state.groupsBySubject.get(assignment.subjectCode) || [];
-        const sourceGroup = subjectGroups.find((group) => group.groupId === assignment.groupId);
-        if (!sourceGroup) {
-          unresolved.push(`${student.id}:${assignment.subjectCode}`);
-          return;
-        }
-
-        const strictCandidates = subjectGroups
-          .filter((group) => group.groupId !== sourceGroup.groupId)
-          .map((target) => ({
-            studentId: student.id,
-            subjectCode: assignment.subjectCode,
-            subjectName: assignment.subjectName,
-            fromGroupId: sourceGroup.groupId,
-            fromGroupCode: sourceGroup.groupCode,
-            fromBlock: sourceGroup.block,
-            toGroupId: target.groupId,
-            toGroupCode: target.groupCode,
-            toBlock: target.block,
-            estimatedScoreDelta: 0,
-            priorityTag: 'equalize' as const,
-          }))
-          .filter((candidate) => moveIsFeasible(state, candidate, 0, config.classBlockRestrictions));
-
-        const pickStrict = [...strictCandidates]
-          .map((candidate) => ({
-            candidate,
-            score: scoreFallbackCollisionMove(state, config, candidate),
-          }))
-          .filter((entry) => Number.isFinite(entry.score))
-          .sort((left, right) => left.score - right.score)[0];
-
-        if (pickStrict && pickStrict.score <= 0) {
-          const success = applyCandidateMoveToState(
-            state,
-            pickStrict.candidate,
-            'collision-fix',
-            pickStrict.score,
-            0,
-            config.classBlockRestrictions
-          );
-          if (success) {
-            applied.push(state.history[state.history.length - 1]);
-            return;
-          }
-        }
-
+      assignmentsInBlock.slice(1).forEach((assignment) => {
         unresolved.push(`${student.id}:${assignment.subjectCode}`);
       });
     });
@@ -1912,11 +2048,15 @@ export const progressiveHybridBalance = (
   const mergedConfig = mergeConfig(config);
   const excludedSubjects = toExcludedSubjectSet(mergedConfig.excludedSubjects);
   let state = buildState(rows, subjectSettingsByName, mergedConfig);
-  let bestStrictState = cloneState(state);
   const beforeOvercapSeatCount = computeOvercapSeatCountForExcluded(state, excludedSubjects);
 
   const beforeScore = computeScore(state, mergedConfig.weights, state.history, excludedSubjects);
   const subjectMetricsBefore = collectSubjectMetrics(state, excludedSubjects);
+
+  // Phase 0: Resolve block-collisions first, ignoring group capacity.
+  // Only subjects that truly cannot be placed in separate blocks will remain as warnings.
+  repairCollisions(state, mergedConfig);
+  let bestStrictState = cloneState(state);
 
   let passesRun = 0;
   let lookaheadAttempts = 0;

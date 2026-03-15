@@ -64,14 +64,35 @@
 
 .subjectExclusionHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 10px;
 }
 
-.subjectExclusionHeader h4 {
-  margin: 0 0 4px;
+.subjectExclusionHeader p {
+  margin: 0;
+}
+
+.collapsibleHeaderBtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #133e6f;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.chevron {
+  font-size: 12px;
+  color: #1d5b8f;
 }
 
 .subjectExclusionList {
@@ -100,6 +121,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .weightsGrid label {

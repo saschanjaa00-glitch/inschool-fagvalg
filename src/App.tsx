@@ -706,6 +706,9 @@ function App() {
   };
 
   const hasDataTabs = parsedFiles.length > 0 || mergedData.length > 0;
+  const changeLogStudentCount = new Set(
+    studentAssignmentChanges.map((change) => change.studentId || `${change.navn}|${change.klasse}`)
+  ).size;
 
   return (
     <div className="app">
@@ -974,7 +977,7 @@ function App() {
                   className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
                   onClick={() => setActiveDataTab('changelog')}
                 >
-                  Endringslogg ({studentAssignmentChanges.length} endringer)
+                  Endringslogg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
                 </button>
                 <button
                   type="button"
