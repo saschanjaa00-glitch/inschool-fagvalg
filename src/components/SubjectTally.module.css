@@ -262,7 +262,7 @@
   display: grid;
   width: 100%;
   gap: 4px;
-  min-height: 24px;
+  min-height: 28px;
   align-content: center;
 }
 
@@ -364,7 +364,6 @@
 
 .groupEmptySlot {
   width: 100%;
-  min-height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;

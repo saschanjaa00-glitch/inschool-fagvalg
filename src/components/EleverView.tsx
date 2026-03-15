@@ -164,6 +164,16 @@ const formatTimestamp = (iso: string): string => {
   }).format(date);
 };
 
+const formatChangeLabel = (change: { reason: string; fromBlokk: number; toBlokk: number }): string => {
+  const reason = change.reason || '';
+  if (reason.toUpperCase().includes('BALANSERING')) {
+    const from = change.fromBlokk > 0 ? `Blokk ${change.fromBlokk}` : 'ingen blokk';
+    const to = change.toBlokk > 0 ? `Blokk ${change.toBlokk}` : 'ingen blokk';
+    return `Balansering: ${from} \u2192 ${to}`;
+  }
+  return reason;
+};
+
 const makeGroupId = () => {
   return `group-${Math.random().toString(36).slice(2, 11)}`;
 };
@@ -1204,7 +1214,7 @@ export const EleverView = ({
                   <ul className={styles.logList}>
                     {visibleStudentChanges.map((change, index) => (
                       <li key={`${change.changedAt}-${index}`}>
-                        <span>{change.reason}</span>
+                        <span title={change.reason}>{change.subject ? <strong>{change.subject}</strong> : null}{change.subject ? ': ' : ''}{formatChangeLabel(change)}</span>
                         <small>{formatTimestamp(change.changedAt)}</small>
                       </li>
                     ))}

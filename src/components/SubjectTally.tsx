@@ -682,8 +682,8 @@ export const SubjectTally = ({
                               </div>
                             );
                           })}
+                          {entries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
                         </div>
-                        {entries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
                         <button
                           type="button"
                           className={styles.groupAddButton}
