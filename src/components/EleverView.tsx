@@ -74,6 +74,10 @@ const parseSubjects = (value: string | null): string[] => {
     .filter((subject) => subject.length > 0);
 };
 
+const normalizeSubjectKey = (value: string): string => {
+  return value.trim().toLocaleLowerCase('nb');
+};
+
 const isSameSubject = (left: string, right: string): boolean => {
   return left.localeCompare(right, 'nb', { sensitivity: 'base' }) === 0;
 };
@@ -212,6 +216,35 @@ export const EleverView = ({
     return subjectOptions.slice().sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
   }, [subjectOptions]);
 
+  const subjectStudentIdsByBlokk = useMemo(() => {
+    const bySubject = new Map<string, Record<number, string[]>>();
+
+    data.forEach((student, index) => {
+      const studentId = getStudentId(student, index);
+
+      for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
+        const blokkValue = student[getBlokkKey(blokkNumber)] as string | null;
+        const normalizedSubjects = Array.from(
+          new Set(parseSubjects(blokkValue).map((subject) => normalizeSubjectKey(subject)))
+        );
+
+        normalizedSubjects.forEach((normalizedSubject) => {
+          if (!normalizedSubject) {
+            return;
+          }
+
+          const subjectByBlokk = bySubject.get(normalizedSubject) || {};
+          const ids = subjectByBlokk[blokkNumber] || [];
+          ids.push(studentId);
+          subjectByBlokk[blokkNumber] = ids;
+          bySubject.set(normalizedSubject, subjectByBlokk);
+        });
+      }
+    });
+
+    return bySubject;
+  }, [data, blokkCount]);
+
   const studentSummaries = useMemo(() => {
     return data.map((student, index) => {
       const assignments = extractAssignments(student, blokkCount);
@@ -349,18 +382,11 @@ export const EleverView = ({
     const groups = ((subjectSettings?.groups || []) as SubjectGroupSetting[]).slice();
     const assignments = subjectSettings?.groupStudentAssignments || {};
     const defaultMax = typeof subjectSettings?.defaultMax === 'number' ? subjectSettings.defaultMax : 30;
+    const subjectIdsByBlokk = subjectStudentIdsByBlokk.get(normalizeSubjectKey(subject));
 
     const subjectCountsByBlokk: Record<number, number> = {};
     for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
-      let count = 0;
-      data.forEach((student) => {
-        const blokkValue = student[getBlokkKey(blokkNumber)] as string | null;
-        const subjectsInBlokk = parseSubjects(blokkValue);
-        if (subjectsInBlokk.some((entry) => isSameSubject(entry, subject))) {
-          count += 1;
-        }
-      });
-      subjectCountsByBlokk[blokkNumber] = count;
+      subjectCountsByBlokk[blokkNumber] = subjectIdsByBlokk?.[blokkNumber]?.length || 0;
     }
 
     const enabledByBlokk = new Map<number, SubjectGroupSetting[]>();
@@ -414,16 +440,7 @@ export const EleverView = ({
         countsByGroupId[group.id] = 0;
       });
 
-      const studentIdsInBlokk: string[] = [];
-
-      data.forEach((student, index) => {
-        const studentId = getStudentId(student, index);
-        const blokkValue = student[getBlokkKey(blokkNumber)] as string | null;
-        const subjectsInBlokk = parseSubjects(blokkValue);
-        if (subjectsInBlokk.some((entry) => isSameSubject(entry, subject))) {
-          studentIdsInBlokk.push(studentId);
-        }
-      });
+      const studentIdsInBlokk = subjectIdsByBlokk?.[blokkNumber] || [];
 
       let unassignedCount = 0;
       studentIdsInBlokk.forEach((studentId) => {
@@ -461,27 +478,6 @@ export const EleverView = ({
     return result;
   };
 
-  const groupMetricsBySubject = useMemo(() => {
-    const metrics: Record<string, SubjectGroupMetrics> = {};
-    const subjectsInData = new Set<string>();
-
-    data.forEach((student) => {
-      for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
-        parseSubjects(student[getBlokkKey(blokkNumber)] as string | null).forEach((subject) => {
-          subjectsInData.add(subject);
-        });
-      }
-    });
-
-    Object.keys(subjectSettingsByName).forEach((subject) => subjectsInData.add(subject));
-
-    subjectsInData.forEach((subject) => {
-      metrics[subject] = getSubjectGroupMetrics(subject);
-    });
-
-    return metrics;
-  }, [data, blokkCount, subjectSettingsByName]);
-
   const addBlokkOptions = useMemo(() => {
     const normalizedSubject = subjectToAdd.trim();
 
@@ -490,7 +486,7 @@ export const EleverView = ({
     }
 
     return getBlokkOptionsForSubject(normalizedSubject);
-  }, [subjectToAdd, blokkCount, subjectSettingsByName, groupMetricsBySubject]);
+  }, [subjectToAdd, blokkCount, subjectSettingsByName, data]);
 
   useEffect(() => {
     if (addBlokkOptions.length === 0) {
@@ -505,12 +501,12 @@ export const EleverView = ({
   }, [addBlokkOptions, blokkToAdd]);
 
   function getSubjectGroupOptionsForBlokk(subject: string, blokkNumber: number): SubjectGroupOption[] {
-    const metrics = groupMetricsBySubject[subject];
+    const metrics = getSubjectGroupMetrics(subject);
     return metrics?.optionsByBlokk[blokkNumber] || [];
   }
 
   const getSubjectTotalsForBlokk = (subject: string, blokkNumber: number): { students: number; spaces: number } | null => {
-    const metrics = groupMetricsBySubject[subject];
+    const metrics = getSubjectGroupMetrics(subject);
     if (!metrics) {
       return null;
     }
@@ -999,7 +995,7 @@ export const EleverView = ({
       : undefined;
 
     return getBlokkOptionsForSubject(editAssignment.selectedSubject, includeCurrent);
-  }, [editAssignment, groupMetricsBySubject, blokkCount]);
+  }, [editAssignment, blokkCount, subjectSettingsByName, data]);
 
   const handleModalSubjectChange = (value: string) => {
     if (!editAssignment) {
@@ -1161,6 +1157,11 @@ export const EleverView = ({
               {statusMessage && <p className={styles.statusMessage}>{statusMessage}</p>}
 
               <table className={styles.assignmentTable}>
+                <colgroup>
+                  <col className={styles.subjectColumn} />
+                  <col className={styles.blokkColumn} />
+                  <col className={styles.handlingColumn} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Fag</th>
