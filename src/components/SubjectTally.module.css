@@ -29,6 +29,27 @@
   outline: none;
 }
 
+.exportListBtn {
+  display: block;
+  margin-top: 6px;
+  padding: 4px;
+  background: transparent;
+  color: #2a63b7;
+  border: 1px solid #a8c4e8;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+  transition: background 0.15s;
+}
+
+.exportListBtn:hover {
+  background: #eef5ff;
+}
+
 .settingsBtn {
   padding: 5px 10px;
   background: #555;

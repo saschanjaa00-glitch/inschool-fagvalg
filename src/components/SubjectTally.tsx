@@ -12,7 +12,6 @@ import {
   sanitizeCount,
   shouldShowGroup,
   type BlokkLabel,
-  type ResolvedGroup,
   type SubjectGroup,
   type SubjectSettingsByName,
   type StudentIdsByBlokk,
@@ -368,38 +367,61 @@ export const SubjectTally = ({
 
     const exportData = subjects.map((item) => {
       const breakdown = getBlokkBreakdown(item.subject);
-      const { groupsByTarget, activeTotal } = getResolvedForSubject(item.subject, breakdown);
-
-      const formatBlokkCell = (entries: ResolvedGroup[]) => {
-        const visibleEntries = entries.filter(shouldShowGroup);
-
-        if (visibleEntries.length === 0) {
-          return '';
-        }
-
-        const activeCount = visibleEntries
-          .filter((entry) => entry.enabled)
-          .reduce((sum, entry) => sum + entry.allocatedCount, 0);
-
-        const labels = visibleEntries.map((entry) => entry.label).join(', ');
-        return `${activeCount} (${labels})`;
-      };
+      const { activeTotal } = getResolvedForSubject(item.subject, breakdown);
 
       return {
         Fag: item.subject,
-        Blokk1: formatBlokkCell(groupsByTarget['Blokk 1']),
-        Blokk2: formatBlokkCell(groupsByTarget['Blokk 2']),
-        Blokk3: formatBlokkCell(groupsByTarget['Blokk 3']),
-        Blokk4: formatBlokkCell(groupsByTarget['Blokk 4']),
-        TotaltAktive: activeTotal,
-        TotaltOriginalt: item.count,
+        'Blokk 1': breakdown['Blokk 1'],
+        'Blokk 2': breakdown['Blokk 2'],
+        'Blokk 3': breakdown['Blokk 3'],
+        'Blokk 4': breakdown['Blokk 4'],
+        Totalt: activeTotal,
       };
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const mathData = mathOptionRows.map((row) => ({
+      Valg: row.label,
+      Antall: row.count,
+    }));
+
+    const langData = foreignLanguageRows.map((row) => ({
+      Valg: row.label,
+      Antall: row.count,
+    }));
+
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Fagoversikt');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(exportData), 'Fagoversikt');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(mathData), 'Matematikkvalg');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(langData), 'Fremmedspråkvalg');
     XLSX.writeFile(workbook, 'subject_tally.xlsx');
+  };
+
+  const exportStudentList = async (subject: string) => {
+    const XLSX = await loadXlsx();
+
+    const BLOKK_LABELS_ORDERED: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'];
+    const studentIdsByBlokk = getStudentIdsByBlokk(subject);
+    const studentById = new Map<string, StandardField>();
+    mergedData.forEach((student, index) => {
+      studentById.set(getStudentId(student, index), student);
+    });
+
+    const rows: { Fag: string; Blokk: string; Navn: string }[] = [];
+    BLOKK_LABELS_ORDERED.forEach((blokkLabel) => {
+      const ids = studentIdsByBlokk[blokkLabel];
+      const names = ids
+        .map((id) => studentById.get(id)?.navn || '')
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
+      names.forEach((navn) => {
+        rows.push({ Fag: subject, Blokk: blokkLabel, Navn: navn });
+      });
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Elevliste');
+    XLSX.writeFile(workbook, `elevliste-${subject.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`);
   };
 
   const extractMathOptionsFromBlokkMat = (value: string | null): Set<'2P' | 'S1' | 'R1'> => {
@@ -750,6 +772,14 @@ export const SubjectTally = ({
                       <path d="M14 10v7" />
                     </svg>
                   </div>
+                  <button
+                    type="button"
+                    className={styles.exportListBtn}
+                    onClick={() => { void exportStudentList(row.item.subject); }}
+                    title={`Eksporter elevliste for ${row.item.subject}`}
+                  >
+                    Eksporter liste
+                  </button>
                 </td>
               </tr>
             );
