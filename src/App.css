@@ -315,6 +315,18 @@
   font-size: 12px;
 }
 
+.history-btn {
+  background: #24415f;
+  min-width: 40px;
+  padding: 6px 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.history-btn:hover:not(:disabled) {
+  background: #2c5278;
+}
+
 .tabline-status {
   font-size: 12px;
   color: #4f5f73;

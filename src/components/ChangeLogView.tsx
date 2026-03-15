@@ -352,11 +352,11 @@ export const ChangeLogView = ({ changeLog, currentStudents, onOpenStudentCard }:
         return `<section class="student"><h3>${escapeHtml(group.navn)} (${escapeHtml(group.klasse)})</h3><p class="student-meta">${escapeHtml(finalSelection || 'Ingen aktive fagvalg registrert')}</p><div class="student-change-block"><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${changeLines}</table></div><div class="student-spacer">&nbsp;</div></section>`;
       }).join('');
 
-      const title = mode === 'detailed' ? 'Endringslogg (detaljert)' : 'Endringslogg (oppsummert)';
+      const title = mode === 'detailed' ? 'Logg (detaljert)' : 'Logg (oppsummert)';
       const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p><section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
 
       const blob = new Blob(['\ufeff', htmlDocument], { type: 'application/msword;charset=utf-8' });
-      const filename = `endringslogg-${mode}-${formatDateForFilename(generatedAt)}.doc`;
+      const filename = `logg-${mode}-${formatDateForFilename(generatedAt)}.doc`;
       const url = window.URL.createObjectURL(blob);
       const link = window.document.createElement('a');
       link.href = url;
@@ -366,8 +366,8 @@ export const ChangeLogView = ({ changeLog, currentStudents, onOpenStudentCard }:
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Kunne ikke eksportere endringslogg til Word:', error);
-      window.alert('Kunne ikke eksportere endringslogg til Word. Proev igjen.');
+      console.error('Kunne ikke eksportere logg til Word:', error);
+      window.alert('Kunne ikke eksportere logg til Word. Proev igjen.');
     }
   };
 

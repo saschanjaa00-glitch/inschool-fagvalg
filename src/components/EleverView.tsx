@@ -1362,7 +1362,7 @@ export const EleverView = ({
                   className={styles.logHeaderButton}
                   onClick={() => setLogExpanded((prev) => !prev)}
                 >
-                  <span>Endringslogg ({selectedStudentChanges.length})</span>
+                  <span>Logg ({selectedStudentChanges.length})</span>
                   <span className={styles.logHeaderChevron}>{logExpanded ? '−' : '+'}</span>
                 </button>
                 {logExpanded && (

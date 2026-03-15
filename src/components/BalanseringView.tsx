@@ -196,7 +196,7 @@ export const BalanseringView = ({
         result.diagnostics.beforeScore.total
       )} -> ${formatNumber(result.diagnostics.afterScore.total)}${
         unresolvedCollisionCount > 0
-          ? `, ADVARSEL: ${unresolvedCollisionCount} elevfag kan ikke plasseres uten kollisjon (se endringslogg)`
+          ? `, ADVARSEL: ${unresolvedCollisionCount} elevfag kan ikke plasseres uten kollisjon (se logg)`
           : ''
       }`
     );
@@ -259,7 +259,7 @@ export const BalanseringView = ({
       <section className={styles.card}>
         <h3>Hybrid balansering</h3>
         <p className={styles.description}>
-          Blokk-kollisjoner repareres forst, for appen balanserer gruppene. Logg per elev finner du pa Endringslogg
+          Blokk-kollisjoner repareres forst, for appen balanserer gruppene. Logg per elev finner du pa Logg
           etterpa, denne kan brukes for a gjore endringene i InSchool. Forst, sjekk lassebegreninger, sett opp hvilke
           blokker hvert trinn skal kunne bruke. Velg sa type balansering. Få antall under maks tar minst tid, men kan gi mer
           skjevfordelte grupper enn Balanser mest mulig jevnt. Er det fag som ikke skal balanseres, kan disse utelukkes

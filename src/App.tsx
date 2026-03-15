@@ -31,6 +31,7 @@ import {
 const LOCAL_STORAGE_KEY = 'fagvalg-opptelling-state-v1';
 const JSON_TRANSFER_FORMAT = 'inschool-balansering-state';
 const JSON_TRANSFER_VERSION = 1;
+const MAX_HISTORY_STATES = 20;
 
 interface PersistedAppState {
   parsedFiles: ParsedFile[];
@@ -64,6 +65,14 @@ interface WarningIgnoreEntry {
 type GroupSubview = 'subjects' | 'groups';
 type StudentSubview = 'elever' | 'students';
 
+const clonePersistedState = (state: PersistedAppState): PersistedAppState => {
+  return JSON.parse(JSON.stringify(state)) as PersistedAppState;
+};
+
+const arePersistedStatesEqual = (left: PersistedAppState, right: PersistedAppState): boolean => {
+  return JSON.stringify(left) === JSON.stringify(right);
+};
+
 function App() {
   const jsonImportInputRef = useRef<HTMLInputElement | null>(null);
   const studentExportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +102,8 @@ function App() {
   const [selectedEleverStudentId, setSelectedEleverStudentId] = useState('');
   const [eleverViewActivationToken, setEleverViewActivationToken] = useState(0);
   const [selectedMergedSubject, setSelectedMergedSubject] = useState('');
+  const [undoHistory, setUndoHistory] = useState<PersistedAppState[]>([]);
+  const [redoHistory, setRedoHistory] = useState<PersistedAppState[]>([]);
   const [classBlockRestrictions, setClassBlockRestrictions] = useState<ClassBlockRestrictions>(
     DEFAULT_CLASS_BLOCK_RESTRICTIONS
   );
@@ -123,9 +134,33 @@ function App() {
     classBlockRestrictions,
   });
 
-  const applyPersistedState = (parsedState: Partial<PersistedAppState>) => {
+  const pushUndoSnapshot = (snapshot: PersistedAppState) => {
+    const clonedSnapshot = clonePersistedState(snapshot);
+
+    setUndoHistory((prev) => {
+      const lastSnapshot = prev[prev.length - 1];
+      if (lastSnapshot && arePersistedStatesEqual(lastSnapshot, clonedSnapshot)) {
+        return prev;
+      }
+
+      const next = [...prev, clonedSnapshot];
+      return next.slice(-MAX_HISTORY_STATES);
+    });
+
+    setRedoHistory([]);
+  };
+
+  const captureUndoSnapshot = () => {
+    pushUndoSnapshot(buildPersistedState());
+  };
+
+  const applyPersistedState = (
+    parsedState: Partial<PersistedAppState>,
+    options?: { preserveActiveView?: boolean }
+  ) => {
     const importedParsedFiles = Array.isArray(parsedState.parsedFiles) ? parsedState.parsedFiles : [];
     const importedMergedData = Array.isArray(parsedState.mergedData) ? parsedState.mergedData : [];
+    const preserveActiveView = options?.preserveActiveView ?? false;
 
     setParsedFiles(importedParsedFiles);
     setMappings(
@@ -197,9 +232,69 @@ function App() {
     setColumnMapperExpanded(importedParsedFiles.length > 0 && importedMergedData.length === 0);
     setShowReloadConfirmModal(false);
     setIsReloadConfirmArmed(false);
+    setIsStudentExportMenuOpen(false);
+
+    if (preserveActiveView && importedMergedData.length > 0) {
+      setActiveDataTab((current) => (current === 'import' ? 'subjects' : current));
+      return;
+    }
+
     setActiveGroupTab('subjects');
     setActiveStudentTab('elever');
     setActiveDataTab(importedMergedData.length > 0 ? 'subjects' : 'import');
+  };
+
+  const handleUndo = () => {
+    if (undoHistory.length === 0) {
+      return;
+    }
+
+    const currentSnapshot = clonePersistedState(buildPersistedState());
+    const previousSnapshot = undoHistory[undoHistory.length - 1];
+
+    setUndoHistory((prev) => prev.slice(0, -1));
+    setRedoHistory((prev) => [...prev, currentSnapshot].slice(-MAX_HISTORY_STATES));
+    applyPersistedState(previousSnapshot, { preserveActiveView: true });
+  };
+
+  const handleRedo = () => {
+    if (redoHistory.length === 0) {
+      return;
+    }
+
+    const currentSnapshot = clonePersistedState(buildPersistedState());
+    const nextSnapshot = redoHistory[redoHistory.length - 1];
+
+    setRedoHistory((prev) => prev.slice(0, -1));
+    setUndoHistory((prev) => [...prev, currentSnapshot].slice(-MAX_HISTORY_STATES));
+    applyPersistedState(nextSnapshot, { preserveActiveView: true });
+  };
+
+  const handleSaveSubjectSettingsByName = (nextSettings: SubjectSettingsByName) => {
+    if (JSON.stringify(nextSettings) === JSON.stringify(subjectSettingsByName)) {
+      return;
+    }
+
+    captureUndoSnapshot();
+    setSubjectSettingsByName(nextSettings);
+  };
+
+  const handleClassBlockRestrictionsChange = (nextRestrictions: ClassBlockRestrictions) => {
+    if (JSON.stringify(nextRestrictions) === JSON.stringify(classBlockRestrictions)) {
+      return;
+    }
+
+    captureUndoSnapshot();
+    setClassBlockRestrictions(nextRestrictions);
+  };
+
+  const handleBlokkCountChange = (nextBlokkCount: number) => {
+    if (nextBlokkCount === blokkCount) {
+      return;
+    }
+
+    captureUndoSnapshot();
+    setBlokkCount(nextBlokkCount);
   };
 
   useEffect(() => {
@@ -279,6 +374,7 @@ function App() {
   ]);
 
   const handleFilesAdded = (files: ParsedFile[]) => {
+    captureUndoSnapshot();
     setParsedFiles((prev) => [...prev, ...files]);
     
     // Auto-detect and apply mappings for new files
@@ -291,12 +387,14 @@ function App() {
   };
 
   const handleMappingChange = (fileId: string, mapping: ColumnMapping) => {
+    captureUndoSnapshot();
     const newMappings = new Map(mappings);
     newMappings.set(fileId, mapping);
     setMappings(newMappings);
   };
 
   const handleMerge = () => {
+    captureUndoSnapshot();
     const merged = mergeFiles(parsedFiles, mappings).sort((a, b) => {
       const classA = (a.klasse || '').trim();
       const classB = (b.klasse || '').trim();
@@ -337,6 +435,7 @@ function App() {
   };
 
   const handleReset = () => {
+    captureUndoSnapshot();
     setParsedFiles([]);
     setMappings(new Map());
     setMergedData([]);
@@ -360,6 +459,8 @@ function App() {
     if (result.moveRecords.length === 0 && result.diagnostics.unresolvedCollisions.length === 0) {
       return;
     }
+
+    captureUndoSnapshot();
 
     const nowIso = new Date().toISOString();
     const studentById = new Map<string, StandardField>();
@@ -442,6 +543,8 @@ function App() {
       return;
     }
 
+    captureUndoSnapshot();
+
     setMergedData(workingData);
     setSubjects(tallySubjects(workingData));
     setStudentAssignmentChanges((prev) => [...prev, ...allChanges]);
@@ -454,6 +557,7 @@ function App() {
   };
 
   const handleRemoveFile = (fileId: string) => {
+    captureUndoSnapshot();
     setParsedFiles((prev) => prev.filter((f) => f.id !== fileId));
     const newMappings = new Map(mappings);
     newMappings.delete(fileId);
@@ -543,6 +647,7 @@ function App() {
         throw new Error('Invalid JSON state');
       }
 
+      captureUndoSnapshot();
       applyPersistedState(importedState as Partial<PersistedAppState>);
       setIsHydratedFromStorage(true);
       showJsonTransferStatus(`Importerte ${file.name}`);
@@ -559,6 +664,8 @@ function App() {
       return;
     }
 
+    captureUndoSnapshot();
+
     setMergedData(updatedData);
     setSubjects(tallySubjects(updatedData));
     setStudentAssignmentChanges((prev) => [...prev, ...changes]);
@@ -573,6 +680,8 @@ function App() {
     if (result.changes.length === 0) {
       return;
     }
+
+    captureUndoSnapshot();
 
     setMergedData(result.updatedData);
     setSubjects(tallySubjects(result.updatedData));
@@ -729,6 +838,12 @@ function App() {
     const rawComment = explicitComment ?? warningIgnoreDraftByStudentId[studentId] ?? '';
     const comment = rawComment.trim();
 
+    if (warningIgnoresByStudentAndType[studentId]?.[type]?.comment === comment) {
+      return;
+    }
+
+    captureUndoSnapshot();
+
     setWarningIgnoresByStudentAndType((prev) => ({
       ...prev,
       [studentId]: {
@@ -742,6 +857,12 @@ function App() {
   };
 
   const removeWarningIgnore = (studentId: string, type: WarningType) => {
+    if (!warningIgnoresByStudentAndType[studentId]?.[type]) {
+      return;
+    }
+
+    captureUndoSnapshot();
+
     setWarningIgnoresByStudentAndType((prev) => {
       const next = { ...prev };
       const current = { ...(next[studentId] || {}) };
@@ -1107,7 +1228,7 @@ function App() {
                     className={`data-tab ${activeDataTab === 'import' ? 'data-tab-active' : ''}`.trim()}
                     onClick={() => setActiveDataTab('import')}
                   >
-                    Last inn data
+                    Data
                   </button>
                   {hasLoadedData && (
                     <>
@@ -1145,12 +1266,32 @@ function App() {
                         className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
                         onClick={() => setActiveDataTab('changelog')}
                       >
-                        Endringslogg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
+                        Logg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
                       </button>
                     </>
                   )}
                 </div>
                 <div className="data-tab-actions">
+                  <button
+                    type="button"
+                    className="export-btn tabline-action-btn history-btn"
+                    disabled={undoHistory.length === 0}
+                    onClick={handleUndo}
+                    aria-label="Angre"
+                    title={undoHistory.length > 0 ? `Angre siste endring (${undoHistory.length}/${MAX_HISTORY_STATES})` : 'Ingen endringer å angre'}
+                  >
+                    ↶
+                  </button>
+                  <button
+                    type="button"
+                    className="export-btn tabline-action-btn history-btn"
+                    disabled={redoHistory.length === 0}
+                    onClick={handleRedo}
+                    aria-label="Gjør om"
+                    title={redoHistory.length > 0 ? `Gjør om siste angrede endring (${redoHistory.length}/${MAX_HISTORY_STATES})` : 'Ingen endringer å gjøre om'}
+                  >
+                    ↷
+                  </button>
                   <div className="tabline-menu" ref={studentExportMenuRef}>
                     <button
                       type="button"
@@ -1315,7 +1456,7 @@ function App() {
                             onMappingChange={handleMappingChange}
                             currentMappings={mappings}
                             blokkCount={blokkCount}
-                            onBlokkCountChange={setBlokkCount}
+                            onBlokkCountChange={handleBlokkCountChange}
                           />
                         )}
                       </div>
@@ -1324,7 +1465,7 @@ function App() {
 
                   <div className="action-buttons">
                     <button onClick={handleLoadDataClick} className="load-btn" disabled={parsedFiles.length === 0}>
-                      Last inn data
+                      Data
                     </button>
                     <button onClick={handleClearStoredData} className="clear-storage-btn">
                       Tøm data
@@ -1336,7 +1477,7 @@ function App() {
                   subjects={subjects}
                   mergedData={mergedData}
                   subjectSettingsByName={subjectSettingsByName}
-                  onSaveSubjectSettingsByName={setSubjectSettingsByName}
+                  onSaveSubjectSettingsByName={handleSaveSubjectSettingsByName}
                   onApplySubjectBlockMoves={handleApplySubjectBlockMoves}
                   onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
                   onOpenStudentCard={handleOpenStudentInElever}
@@ -1349,7 +1490,7 @@ function App() {
                   subjectSettingsByName={subjectSettingsByName}
                   classBlockRestrictions={classBlockRestrictions}
                   changeLog={studentAssignmentChanges}
-                  onSaveSubjectSettingsByName={setSubjectSettingsByName}
+                  onSaveSubjectSettingsByName={handleSaveSubjectSettingsByName}
                   onStudentDataUpdate={handleStudentAssignmentsUpdated}
                   onOpenStudentCard={handleOpenStudentInElever}
                 />
@@ -1364,7 +1505,7 @@ function App() {
                   mergedData={mergedData}
                   subjectSettingsByName={subjectSettingsByName}
                   restrictions={classBlockRestrictions}
-                  onRestrictionsChange={setClassBlockRestrictions}
+                  onRestrictionsChange={handleClassBlockRestrictionsChange}
                   onApplyResult={handleApplyBalancingResult}
                 />
               ) : activeDataTab === 'students' ? (
@@ -1382,7 +1523,7 @@ function App() {
                   blokkCount={blokkCount}
                   subjectOptions={subjects.map((subject) => subject.subject)}
                   subjectSettingsByName={subjectSettingsByName}
-                  onSaveSubjectSettingsByName={setSubjectSettingsByName}
+                  onSaveSubjectSettingsByName={handleSaveSubjectSettingsByName}
                   warningIgnoresByStudentAndType={warningIgnoresByStudentAndType}
                   onSaveWarningIgnore={(studentId, type, comment) => saveWarningIgnore(studentId, type, comment)}
                   onRemoveWarningIgnore={removeWarningIgnore}
