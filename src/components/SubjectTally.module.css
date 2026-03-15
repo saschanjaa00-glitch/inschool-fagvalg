@@ -195,7 +195,7 @@
 }
 
 .subjectNameCell {
-  transition: font-weight 0.15s ease;
+  transition: color 0.15s ease;
 }
 
 .subjectRow:hover .totalCell {
@@ -209,7 +209,7 @@
 }
 
 .subjectRow:hover .subjectNameCell {
-  font-weight: 700;
+  color: #0f3f70;
 }
 
 .exportBtn {
