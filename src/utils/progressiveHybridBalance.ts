@@ -115,6 +115,7 @@ export interface BalancingConfig {
   weights: BalancingWeights;
   epsilon: number;
   maxRelaxation: number;
+  capacityOffsets?: number[];
   maxPassMillis: number;
   maxLookaheadAttempts: number;
   maxDepth2Chains: number;
@@ -312,6 +313,30 @@ const buildCapacityOffsetSchedule = (maxRelaxation: number, step: number = DEFAU
   offsets.push(0);
 
   return offsets;
+};
+
+const normalizeCapacityOffsets = (capacityOffsets: number[] | undefined, maxRelaxation: number): number[] => {
+  if (!Array.isArray(capacityOffsets) || capacityOffsets.length === 0) {
+    return buildCapacityOffsetSchedule(maxRelaxation);
+  }
+
+  const sanitized = Array.from(
+    new Set(
+      capacityOffsets
+        .map((value) => Math.max(0, Math.floor(value)))
+        .filter((value) => Number.isFinite(value))
+    )
+  ).sort((left, right) => right - left);
+
+  if (sanitized.length === 0) {
+    return buildCapacityOffsetSchedule(maxRelaxation);
+  }
+
+  if (sanitized[sanitized.length - 1] !== 0) {
+    sanitized.push(0);
+  }
+
+  return sanitized;
 };
 
 const cloneState = (state: InternalState): InternalState => {
@@ -2035,6 +2060,9 @@ const mergeConfig = (config?: Partial<BalancingConfig>): BalancingConfig => {
       ...DEFAULT_BALANCING_CONFIG.classBlockRestrictions,
       ...(config?.classBlockRestrictions || {}),
     },
+    capacityOffsets: Array.isArray(config?.capacityOffsets)
+      ? [...config.capacityOffsets]
+      : DEFAULT_BALANCING_CONFIG.capacityOffsets,
     excludedSubjects: config?.excludedSubjects || DEFAULT_BALANCING_CONFIG.excludedSubjects,
     lockedAssignmentKeys: config?.lockedAssignmentKeys || DEFAULT_BALANCING_CONFIG.lockedAssignmentKeys,
   };
@@ -2064,7 +2092,7 @@ export const progressiveHybridBalance = (
   let lookaheadRollback = 0;
 
   const startTime = Date.now();
-  const capacityOffsets = buildCapacityOffsetSchedule(mergedConfig.maxRelaxation);
+  const capacityOffsets = normalizeCapacityOffsets(mergedConfig.capacityOffsets, mergedConfig.maxRelaxation);
   const totalBudgetMillis = mergedConfig.maxPassMillis * capacityOffsets.length;
 
   for (const offset of capacityOffsets) {

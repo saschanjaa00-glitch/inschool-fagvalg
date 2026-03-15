@@ -96,6 +96,10 @@ const inferClassLevel = (classGroup: string | null | undefined): string | null =
   return null;
 };
 
+type BalancePresetMode = 'even' | 'underMax' | 'advanced';
+
+const EVEN_BALANCE_OFFSETS: number[] = [20, 15, 10, 8, 6, 4, 2, 0];
+
 export const BalanseringView = ({
   mergedData,
   subjectSettingsByName,
@@ -109,6 +113,7 @@ export const BalanseringView = ({
   const [maxLookaheadAttempts, setMaxLookaheadAttempts] = useState(String(DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts));
   const [maxDepth2Chains, setMaxDepth2Chains] = useState(String(DEFAULT_BALANCING_CONFIG.maxDepth2Chains));
   const [excludedSubjects, setExcludedSubjects] = useState<string[]>(DEFAULT_BALANCING_CONFIG.excludedSubjects);
+  const [presetMode, setPresetMode] = useState<BalancePresetMode>('even');
   const [parametersExpanded, setParametersExpanded] = useState(false);
   const [excludedSubjectsExpanded, setExcludedSubjectsExpanded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -149,12 +154,27 @@ export const BalanseringView = ({
       return;
     }
 
+    const parsedMaxRelaxation = Math.max(
+      0,
+      Math.floor(parseInputNumber(maxRelaxation, DEFAULT_BALANCING_CONFIG.maxRelaxation))
+    );
+
+    const effectiveMaxRelaxation =
+      presetMode === 'even'
+        ? 20
+        : presetMode === 'underMax'
+          ? 2
+          : parsedMaxRelaxation;
+
+    const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
+
     const config: Partial<BalancingConfig> = {
       weights: {
         ...weights,
         collisionD: FIXED_COLLISION_WEIGHT,
       },
-      maxRelaxation: Math.max(0, Math.floor(parseInputNumber(maxRelaxation, DEFAULT_BALANCING_CONFIG.maxRelaxation))),
+      maxRelaxation: effectiveMaxRelaxation,
+      capacityOffsets,
       maxPassMillis: Math.max(200, Math.floor(parseInputNumber(maxPassMillis, DEFAULT_BALANCING_CONFIG.maxPassMillis))),
       maxLookaheadAttempts: Math.max(
         0,
@@ -211,13 +231,34 @@ export const BalanseringView = ({
     setExcludedSubjects([]);
   };
 
+  const selectPreset = (mode: BalancePresetMode) => {
+    setPresetMode(mode);
+
+    if (mode === 'even') {
+      setMaxRelaxation('20');
+      setParametersExpanded(false);
+      return;
+    }
+
+    if (mode === 'underMax') {
+      setMaxRelaxation('2');
+      setParametersExpanded(false);
+      return;
+    }
+
+    setParametersExpanded(true);
+  };
+
   return (
     <div className={styles.wrapper}>
       <section className={styles.card}>
         <h3>Hybrid balansering</h3>
         <p className={styles.description}>
-          Min-cost flyt-lignende global pass med lokal lookahead-reparasjon. Motormodulene er deterministiske med
-          stabil tie-breaker.
+          Blokk-kollisjoner repareres forst, for appen balanserer gruppene. Logg per elev finner du pa Endringslogg
+          etterpa, denne kan brukes for a gjore endringene i InSchool. Forst, sjekk lassebegreninger, sett opp hvilke
+          blokker hvert trinn skal kunne bruke. Velg sa type balansering. Fa under maks tar minst tid, men kan gi mer
+          skjevfordelte grupper enn Balanser mest mulig jevnt. Er det fag som ikke skal balanseres, kan disse utelukkes
+          fra balansering.
         </p>
 
         <div className={styles.constraintsBox}>
@@ -265,6 +306,30 @@ export const BalanseringView = ({
           </button>
         </div>
 
+        <div className={styles.presetRow}>
+          <button
+            type="button"
+            className={`${styles.presetBtn} ${presetMode === 'even' ? styles.presetBtnActive : ''}`.trim()}
+            onClick={() => selectPreset('even')}
+          >
+            Balanser mest mulig jevnt
+          </button>
+          <button
+            type="button"
+            className={`${styles.presetBtn} ${presetMode === 'underMax' ? styles.presetBtnActive : ''}`.trim()}
+            onClick={() => selectPreset('underMax')}
+          >
+            Fa under maks
+          </button>
+          <button
+            type="button"
+            className={`${styles.presetBtn} ${presetMode === 'advanced' ? styles.presetBtnActive : ''}`.trim()}
+            onClick={() => selectPreset('advanced')}
+          >
+            Avansert
+          </button>
+        </div>
+
         <div className={styles.constraintsBox}>
           <button
             type="button"
@@ -277,7 +342,11 @@ export const BalanseringView = ({
           </button>
 
           {parametersExpanded && (
-            <div className={styles.weightsGrid}>
+            <fieldset className={styles.parametersFieldset} disabled={presetMode !== 'advanced'}>
+              {presetMode !== 'advanced' && (
+                <p className={styles.parametersHint}>Velg Avansert for a redigere parameterne.</p>
+              )}
+              <div className={styles.weightsGrid}>
               <label>
                 Overkapasitet (A)
                 <input
@@ -408,7 +477,8 @@ export const BalanseringView = ({
                   onChange={(event) => setMaxDepth2Chains(event.target.value)}
                 />
               </label>
-            </div>
+              </div>
+            </fieldset>
           )}
         </div>
 
