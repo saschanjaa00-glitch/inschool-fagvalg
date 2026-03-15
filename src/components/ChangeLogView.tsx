@@ -88,12 +88,27 @@ const parseSubjects = (value: string | null | undefined): string[] => {
     .filter((subject) => subject.length > 0);
 };
 
+const normalizeSearchText = (value: string): string => {
+  return value.trim().toLocaleLowerCase('nb');
+};
+
+const parseSearchTokens = (value: string): string[] => {
+  return normalizeSearchText(value)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+};
+
 const isSameSubject = (left: string, right: string): boolean => {
   return left.localeCompare(right, 'nb', { sensitivity: 'base' }) === 0;
 };
 
 const getStudentId = (student: StandardField, index: number): string => {
   return student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
+};
+
+const isManualStudentId = (studentId: string): boolean => {
+  return studentId.startsWith('manual:');
 };
 
 const getBlokkKey = (blokkNumber: number): BlokkField => {
@@ -186,6 +201,7 @@ export const ChangeLogView = ({
 }: ChangeLogViewProps) => {
   const [mode, setMode] = useState<LogMode>('summary');
   const [warningsExpanded, setWarningsExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const studentsById = useMemo(() => {
     const map = new Map<string, StandardField>();
@@ -292,6 +308,28 @@ export const ChangeLogView = ({
 
     return groupedSummaries;
   }, [groupedSummaries, mode]);
+
+  const filteredVisibleGroups = useMemo(() => {
+    const tokens = parseSearchTokens(searchQuery);
+    if (tokens.length === 0) {
+      return visibleGroups;
+    }
+
+    return visibleGroups.filter((group) => {
+      const searchableName = `${group.navn} ${group.klasse}`.toLocaleLowerCase('nb');
+      const subjectSet = new Set<string>([
+        ...group.changes.map((entry) => entry.subject),
+        ...group.summaryEntries.map((entry) => entry.subject),
+      ]);
+      const searchableSubjects = Array.from(subjectSet)
+        .join(' ')
+        .toLocaleLowerCase('nb');
+
+      return tokens.every((token) => {
+        return searchableName.includes(token) || searchableSubjects.includes(token);
+      });
+    });
+  }, [searchQuery, visibleGroups]);
 
   const excludedSubjectsSet = useMemo(() => {
     return new Set(
@@ -483,14 +521,14 @@ export const ChangeLogView = ({
   };
 
   const handleExportToWord = () => {
-    if (visibleGroups.length === 0) {
+    if (filteredVisibleGroups.length === 0) {
       return;
     }
 
     try {
       const generatedAt = new Date();
 
-      const studentRows = visibleGroups.map((group) => {
+      const studentRows = filteredVisibleGroups.map((group) => {
         const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
         const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
         const finalSelection = formatFinalAllocation(currentStudent);
@@ -533,10 +571,6 @@ export const ChangeLogView = ({
 
   if (groupedChanges.length === 0 && !hasBalancingWarnings) {
     return <div className={styles.empty}>Ingen endringer registrert enda.</div>;
-  }
-
-  if (visibleGroups.length === 0 && !hasBalancingWarnings) {
-    return <div className={styles.empty}>Ingen oppsummerte endringer registrert.</div>;
   }
 
   return (
@@ -587,77 +621,105 @@ export const ChangeLogView = ({
       )}
 
       <div className={styles.topBar}>
-        <div className={styles.modeToggle}>
-          <button
-            type="button"
-            className={`${styles.modeBtn} ${mode === 'summary' ? styles.modeBtnActive : ''}`.trim()}
-            onClick={() => setMode('summary')}
-          >
-            Oppsummert logg
-          </button>
-          <button
-            type="button"
-            className={`${styles.modeBtn} ${mode === 'detailed' ? styles.modeBtnActive : ''}`.trim()}
-            onClick={() => setMode('detailed')}
-          >
-            Detaljert logg
-          </button>
+        <div className={styles.topBarControls}>
+          <div className={styles.modeToggle}>
+            <button
+              type="button"
+              className={`${styles.modeBtn} ${mode === 'summary' ? styles.modeBtnActive : ''}`.trim()}
+              onClick={() => setMode('summary')}
+            >
+              Oppsummert logg
+            </button>
+            <button
+              type="button"
+              className={`${styles.modeBtn} ${mode === 'detailed' ? styles.modeBtnActive : ''}`.trim()}
+              onClick={() => setMode('detailed')}
+            >
+              Detaljert logg
+            </button>
+          </div>
+          <input
+            type="search"
+            className={styles.searchInput}
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Søk elevnavn eller fag"
+            aria-label="Sok i logg"
+          />
         </div>
         <button type="button" className={styles.exportBtn} onClick={handleExportToWord}>
           Eksporter til Word
         </button>
       </div>
 
-      {visibleGroups.map((group) => (
-        <section key={group.studentId} className={styles.studentBlock}>
-          <h4 className={styles.studentHeader}>
-            {onOpenStudentCard ? (
-              <button
-                type="button"
-                className={styles.studentHeaderBtn}
-                onClick={() => onOpenStudentCard(group.studentId)}
-              >
-                {group.navn} ({group.klasse}) - {mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer
-              </button>
-            ) : (
-              `${group.navn} (${group.klasse}) - ${mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer`
-            )}
-          </h4>
-          {mode === 'summary' && (
-            <p className={styles.studentAllocation}>
-              {finalAllocationByStudentId.get(group.studentId) || 'Ingen aktive fagvalg registrert'}
-            </p>
-          )}
-          <ul className={styles.changeList}>
-            {mode === 'detailed'
-              ? group.changes.map((entry, index) => {
-                return (
-                  <li
-                    key={`${group.studentId}-${entry.changedAt}-${index}`}
-                    className={`${styles.changeItem} ${getDetailedEntryClass(entry, styles)}`.trim()}
-                  >
-                    <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
-                    <span title={entry.reason}>
-                      <strong>{entry.subject}</strong>: {formatDetailedEntryLabel(entry)}
+      {filteredVisibleGroups.length === 0 ? (
+        <div className={styles.empty}>Ingen elever matcher søket.</div>
+      ) : (
+        filteredVisibleGroups.map((group) => (
+          <section key={group.studentId} className={styles.studentBlock}>
+            <h4 className={styles.studentHeader}>
+              {onOpenStudentCard ? (
+                <button
+                  type="button"
+                  className={styles.studentHeaderBtn}
+                  onClick={() => onOpenStudentCard(group.studentId)}
+                >
+                  {group.navn}
+                  {isManualStudentId(group.studentId) ? (
+                    <span className={styles.manualBadge} title="Manuelt lagt til" aria-label="Manuelt lagt til">
+                      +
                     </span>
-                  </li>
-                );
-              })
-              : group.summaryEntries.map((entry, index) => {
-                const changeType = getChangeType(entry.fromBlokk, entry.toBlokk);
-                return (
-                  <li
-                    key={`${group.studentId}-${entry.subject}-${index}`}
-                    className={`${styles.changeItem} ${getChangeItemClass(changeType, styles)}`.trim()}
-                  >
-                    <span className={styles.changeTime}>{formatTimestamp(entry.lastChangedAt)}</span>
-                    <span>{renderSummaryContent(entry)}</span>
-                  </li>
-                );
-              })}
-          </ul>
-        </section>
-      ))}
+                  ) : null}
+                  {' '}({group.klasse}) - {mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer
+                </button>
+              ) : (
+                <>
+                  {group.navn}
+                  {isManualStudentId(group.studentId) ? (
+                    <span className={styles.manualBadge} title="Manuelt lagt til" aria-label="Manuelt lagt til">
+                      +
+                    </span>
+                  ) : null}
+                  {' '}({group.klasse}) - {mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer
+                </>
+              )}
+            </h4>
+            {mode === 'summary' && (
+              <p className={styles.studentAllocation}>
+                {finalAllocationByStudentId.get(group.studentId) || 'Ingen aktive fagvalg registrert'}
+              </p>
+            )}
+            <ul className={styles.changeList}>
+              {mode === 'detailed'
+                ? group.changes.map((entry, index) => {
+                  return (
+                    <li
+                      key={`${group.studentId}-${entry.changedAt}-${index}`}
+                      className={`${styles.changeItem} ${getDetailedEntryClass(entry, styles)}`.trim()}
+                    >
+                      <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                      <span title={entry.reason}>
+                        <strong>{entry.subject}</strong>: {formatDetailedEntryLabel(entry)}
+                      </span>
+                    </li>
+                  );
+                })
+                : group.summaryEntries.map((entry, index) => {
+                  const changeType = getChangeType(entry.fromBlokk, entry.toBlokk);
+                  return (
+                    <li
+                      key={`${group.studentId}-${entry.subject}-${index}`}
+                      className={`${styles.changeItem} ${getChangeItemClass(changeType, styles)}`.trim()}
+                    >
+                      <span className={styles.changeTime}>{formatTimestamp(entry.lastChangedAt)}</span>
+                      <span>{renderSummaryContent(entry)}</span>
+                    </li>
+                  );
+                })}
+            </ul>
+          </section>
+        ))
+      )}
     </div>
   );
 };

@@ -159,6 +159,7 @@ const isMathR1Header = (header: string): boolean => {
 
 export interface StandardField {
   studentId?: string;
+  fjerdearsElev?: boolean;
   navn: string | null;
   klasse: string | null;
   blokkmatvg2: string | null;
@@ -302,6 +303,7 @@ export const mergeFiles = (
     file.data.forEach((row, rowIndex) => {
       const standardRow: StandardField = {
         studentId: `${file.id}:${rowIndex}`,
+        fjerdearsElev: false,
         navn: null,
         klasse: null,
         blokkmatvg2: null,
@@ -322,9 +324,15 @@ export const mergeFiles = (
       
       Object.entries(row).forEach(([fileColumn, value]) => {
         const standardField = mapping[fileColumn];
-        if (standardField && value) {
-          standardRow[standardField as keyof StandardField] = value;
+        if (!standardField || !value) {
+          return;
         }
+
+        if (standardField === 'studentId' || standardField === 'fjerdearsElev') {
+          return;
+        }
+
+        standardRow[standardField as Exclude<keyof StandardField, 'studentId' | 'fjerdearsElev'>] = value;
       });
       
       // Progress class to next year

@@ -92,29 +92,34 @@ const normalizeSubjectKey = (value: string): string => {
   return value.trim().toLocaleLowerCase('nb');
 };
 
-const inferClassLevel = (classGroup: string | null | undefined): string | null => {
+const inferClassLevels = (student: StandardField): string[] => {
+  if (student.fjerdearsElev) {
+    return ['VG2', 'VG3'];
+  }
+
+  const classGroup = student.klasse;
   const normalized = (classGroup || '').trim().toUpperCase();
   if (!normalized) {
-    return null;
+    return [];
   }
 
   const match = normalized.match(/^(\d)/);
   if (!match) {
-    return ['VG1', 'VG2', 'VG3'].includes(normalized) ? normalized : null;
+    return ['VG1', 'VG2', 'VG3'].includes(normalized) ? [normalized] : [];
   }
 
   const year = Number.parseInt(match[1], 10);
   if (year === 1) {
-    return 'VG1';
+    return ['VG1'];
   }
   if (year === 2) {
-    return 'VG2';
+    return ['VG2'];
   }
   if (year >= 3) {
-    return 'VG3';
+    return ['VG3'];
   }
 
-  return null;
+  return [];
 };
 
 const isBlockAllowedForStudent = (
@@ -122,12 +127,12 @@ const isBlockAllowedForStudent = (
   blokkNumber: number,
   restrictions: ClassBlockRestrictions
 ): boolean => {
-  const classLevel = inferClassLevel(student.klasse);
-  if (!classLevel) {
+  const classLevels = inferClassLevels(student);
+  if (classLevels.length === 0) {
     return true;
   }
 
-  return restrictions[classLevel]?.[blokkNumber as 1 | 2 | 3 | 4] ?? true;
+  return classLevels.some((classLevel) => restrictions[classLevel]?.[blokkNumber as 1 | 2 | 3 | 4] ?? true);
 };
 
 const getStudentId = (student: StandardField, index: number): string => {

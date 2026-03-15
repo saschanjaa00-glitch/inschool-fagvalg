@@ -33,6 +33,7 @@ export interface StudentNode {
   id: string;
   fullName: string;
   classGroup: string;
+  isFourthYear: boolean;
   assignments: AssignmentNode[];
 }
 
@@ -264,23 +265,28 @@ const inferStudentId = (row: StandardField, index: number): string => {
   return row.studentId || `${row.navn || 'ukjent'}:${row.klasse || 'ukjent'}:${index}`;
 };
 
-const inferClassLevel = (classGroup: string): string => {
+const inferClassLevels = (classGroup: string, isFourthYear: boolean): string[] => {
+  if (isFourthYear) {
+    return ['VG2', 'VG3'];
+  }
+
   const match = classGroup.trim().toUpperCase().match(/^(\d)/);
   if (!match) {
-    return classGroup.trim().toUpperCase();
+    const normalized = classGroup.trim().toUpperCase();
+    return normalized ? [normalized] : [];
   }
 
   const year = Number.parseInt(match[1], 10);
   if (year === 1) {
-    return 'VG1';
+    return ['VG1'];
   }
   if (year === 2) {
-    return 'VG2';
+    return ['VG2'];
   }
   if (year >= 3) {
-    return 'VG3';
+    return ['VG3'];
   }
-  return classGroup.trim().toUpperCase();
+  return [];
 };
 
 const blockFromLabel = (label: `Blokk ${BlockNumber}`): BlockNumber => {
@@ -373,20 +379,27 @@ const cloneState = (state: InternalState): InternalState => {
 const isClassAllowedInBlock = (
   classGroup: string,
   block: BlockNumber,
-  restrictions: ClassBlockRestrictions
+  restrictions: ClassBlockRestrictions,
+  isFourthYear: boolean
 ): boolean => {
-  const classLevel = inferClassLevel(classGroup);
-  const levelRules = restrictions[classLevel];
-  if (!levelRules) {
+  const classLevels = inferClassLevels(classGroup, isFourthYear);
+  if (classLevels.length === 0) {
     return true;
   }
 
-  const allowed = levelRules[block];
-  if (typeof allowed === 'boolean') {
-    return allowed;
-  }
+  return classLevels.some((classLevel) => {
+    const levelRules = restrictions[classLevel];
+    if (!levelRules) {
+      return true;
+    }
 
-  return true;
+    const allowed = levelRules[block];
+    if (typeof allowed === 'boolean') {
+      return allowed;
+    }
+
+    return true;
+  });
 };
 
 const assignmentLockKey = (studentId: string, subjectCode: string): string => `${studentId}|${subjectCode}`;
@@ -490,6 +503,7 @@ export const buildState = (
     const studentId = inferStudentId(row, index);
     const fullName = row.navn || 'Ukjent';
     const classGroup = row.klasse || '';
+    const isFourthYear = row.fjerdearsElev === true;
 
     const assignments: AssignmentNode[] = [];
 
@@ -517,6 +531,7 @@ export const buildState = (
       id: studentId,
       fullName,
       classGroup,
+      isFourthYear,
       assignments,
     });
   });
@@ -801,7 +816,7 @@ const moveIsFeasible = (
     return false;
   }
 
-  if (!isClassAllowedInBlock(student.classGroup, move.toBlock, restrictions)) {
+  if (!isClassAllowedInBlock(student.classGroup, move.toBlock, restrictions, student.isFourthYear)) {
     return false;
   }
 
@@ -938,7 +953,7 @@ const pickRotationTargets = (
   const targets: RotationGroupTarget[] = [];
 
   for (const step of steps) {
-    if (!isClassAllowedInBlock(student.classGroup, step.toBlock, restrictions)) {
+    if (!isClassAllowedInBlock(student.classGroup, step.toBlock, restrictions, student.isFourthYear)) {
       return null;
     }
 

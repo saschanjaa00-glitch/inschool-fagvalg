@@ -32,6 +32,14 @@ interface AssignmentEntry {
   blokkNumber: number;
 }
 
+type BlokkField = `blokk${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+
+interface PendingStudentAssignment {
+  id: string;
+  subject: string;
+  blokkNumber: number;
+}
+
 type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
 
 interface SubjectGroupSetting {
@@ -82,12 +90,16 @@ const isSameSubject = (left: string, right: string): boolean => {
   return left.localeCompare(right, 'nb', { sensitivity: 'base' }) === 0;
 };
 
-const getBlokkKey = (blokkNumber: number): keyof StandardField => {
-  return `blokk${blokkNumber}` as keyof StandardField;
+const getBlokkKey = (blokkNumber: number): BlokkField => {
+  return `blokk${blokkNumber}` as BlokkField;
 };
 
 const getStudentId = (student: StandardField, index: number): string => {
   return student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
+};
+
+const isManualStudentId = (studentId: string): boolean => {
+  return studentId.startsWith('manual:');
 };
 
 const extractAssignments = (student: StandardField, blokkCount: number): AssignmentEntry[] => {
@@ -187,6 +199,10 @@ const makeGroupId = () => {
   return `group-${Math.random().toString(36).slice(2, 11)}`;
 };
 
+const makePendingAssignmentId = () => {
+  return `pending-${Math.random().toString(36).slice(2, 11)}`;
+};
+
 export const EleverView = ({
   data,
   blokkCount,
@@ -213,11 +229,29 @@ export const EleverView = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [editAssignment, setEditAssignment] = useState<EditAssignmentState | null>(null);
   const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentClass, setNewStudentClass] = useState('');
+  const [newStudentIsFourthYear, setNewStudentIsFourthYear] = useState(false);
+  const [newStudentSubjectToAdd, setNewStudentSubjectToAdd] = useState('');
+  const [newStudentBlokkToAdd, setNewStudentBlokkToAdd] = useState('');
+  const [newStudentAssignments, setNewStudentAssignments] = useState<PendingStudentAssignment[]>([]);
+  const [newStudentModalStatus, setNewStudentModalStatus] = useState('');
 
   const sortedSubjectOptions = useMemo(() => {
     return subjectOptions.slice().sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
   }, [subjectOptions]);
+
+  const classOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        data
+          .map((student) => (student.klasse || '').trim())
+          .filter((value) => value.length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base', numeric: true }));
+  }, [data]);
 
   const subjectStudentIdsByBlokk = useMemo(() => {
     const bySubject = new Map<string, Record<number, string[]>>();
@@ -491,6 +525,16 @@ export const EleverView = ({
     return getBlokkOptionsForSubject(normalizedSubject);
   }, [subjectToAdd, blokkCount, subjectSettingsByName, data]);
 
+  const newStudentAddBlokkOptions = useMemo(() => {
+    const normalizedSubject = newStudentSubjectToAdd.trim();
+
+    if (!normalizedSubject) {
+      return [];
+    }
+
+    return getBlokkOptionsForSubject(normalizedSubject);
+  }, [newStudentSubjectToAdd, blokkCount, subjectSettingsByName, data]);
+
   useEffect(() => {
     if (addBlokkOptions.length === 0) {
       setBlokkToAdd('');
@@ -502,6 +546,28 @@ export const EleverView = ({
       setBlokkToAdd(String(addBlokkOptions[0]));
     }
   }, [addBlokkOptions, blokkToAdd]);
+
+  useEffect(() => {
+    if (!showAddStudentModal) {
+      return;
+    }
+
+    if (!newStudentSubjectToAdd && sortedSubjectOptions.length > 0) {
+      setNewStudentSubjectToAdd(sortedSubjectOptions[0]);
+    }
+  }, [showAddStudentModal, newStudentSubjectToAdd, sortedSubjectOptions]);
+
+  useEffect(() => {
+    if (newStudentAddBlokkOptions.length === 0) {
+      setNewStudentBlokkToAdd('');
+      return;
+    }
+
+    const hasCurrent = newStudentAddBlokkOptions.some((blokk) => String(blokk) === newStudentBlokkToAdd);
+    if (!hasCurrent) {
+      setNewStudentBlokkToAdd(String(newStudentAddBlokkOptions[0]));
+    }
+  }, [newStudentAddBlokkOptions, newStudentBlokkToAdd]);
 
   function getSubjectGroupOptionsForBlokk(subject: string, blokkNumber: number): SubjectGroupOption[] {
     const metrics = getSubjectGroupMetrics(subject);
@@ -855,6 +921,145 @@ export const EleverView = ({
     setShowAddSubjectModal(true);
   };
 
+  const resetAddStudentModalState = () => {
+    setNewStudentName('');
+    setNewStudentClass('');
+    setNewStudentIsFourthYear(false);
+    setNewStudentSubjectToAdd(sortedSubjectOptions[0] || '');
+    setNewStudentBlokkToAdd('');
+    setNewStudentAssignments([]);
+    setNewStudentModalStatus('');
+  };
+
+  const openAddStudentModal = () => {
+    resetAddStudentModalState();
+    setShowAddStudentModal(true);
+  };
+
+  const closeAddStudentModal = () => {
+    setShowAddStudentModal(false);
+    setNewStudentModalStatus('');
+  };
+
+  const setAddStudentStatusMessage = (message: string) => {
+    setNewStudentModalStatus(message);
+
+    window.setTimeout(() => {
+      setNewStudentModalStatus('');
+    }, 2500);
+  };
+
+  const handleQueueStudentSubject = () => {
+    const normalizedSubject = newStudentSubjectToAdd.trim();
+    const blokkNumber = Number.parseInt(newStudentBlokkToAdd, 10);
+
+    if (!normalizedSubject) {
+      setAddStudentStatusMessage('Velg et fag først');
+      return;
+    }
+
+    if (Number.isNaN(blokkNumber) || blokkNumber < 1 || blokkNumber > blokkCount) {
+      setAddStudentStatusMessage('Velg en gyldig blokk');
+      return;
+    }
+
+    const duplicate = newStudentAssignments.some((entry) => isSameSubject(entry.subject, normalizedSubject));
+    if (duplicate) {
+      setAddStudentStatusMessage('Faget er allerede lagt til for eleven');
+      return;
+    }
+
+    setNewStudentAssignments((prev) => [
+      ...prev,
+      {
+        id: makePendingAssignmentId(),
+        subject: normalizedSubject,
+        blokkNumber,
+      },
+    ]);
+  };
+
+  const handleRemoveQueuedStudentSubject = (assignmentId: string) => {
+    setNewStudentAssignments((prev) => prev.filter((entry) => entry.id !== assignmentId));
+  };
+
+  const handleCreateStudent = () => {
+    const trimmedName = newStudentName.trim();
+    const trimmedClass = newStudentClass.trim();
+
+    if (!trimmedName) {
+      setAddStudentStatusMessage('Skriv inn elevnavn');
+      return;
+    }
+
+    if (!trimmedClass) {
+      setAddStudentStatusMessage('Velg klasse');
+      return;
+    }
+
+    const uniqueId = `manual:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+    const nextStudent: StandardField = {
+      studentId: uniqueId,
+      navn: trimmedName,
+      klasse: trimmedClass,
+      fjerdearsElev: newStudentIsFourthYear,
+      blokkmatvg2: null,
+      matematikk2p: null,
+      matematikks1: null,
+      matematikkr1: null,
+      fremmedsprak: null,
+      blokk1: null,
+      blokk2: null,
+      blokk3: null,
+      blokk4: null,
+      blokk5: null,
+      blokk6: null,
+      blokk7: null,
+      blokk8: null,
+      reserve: null,
+    };
+
+    for (let blokkNumber = 1; blokkNumber <= blokkCount; blokkNumber += 1) {
+      const subjects = newStudentAssignments
+        .filter((assignment) => assignment.blokkNumber === blokkNumber)
+        .map((assignment) => assignment.subject);
+
+      if (subjects.length > 0) {
+        const blokkKey = getBlokkKey(blokkNumber);
+        nextStudent[blokkKey] = subjects.join(', ');
+      }
+    }
+
+    const nextData = [...data, nextStudent];
+    const changes: StudentAssignmentChange[] = [
+      {
+        studentId: uniqueId,
+        navn: trimmedName,
+        klasse: trimmedClass,
+        subject: '',
+        fromBlokk: 0,
+        toBlokk: 0,
+        reason: `Elever: la til elev${newStudentIsFourthYear ? ' (Fjerdeårs-elev)' : ''}`,
+        changedAt: new Date().toISOString(),
+      },
+      ...newStudentAssignments.map((assignment) => ({
+        studentId: uniqueId,
+        navn: trimmedName,
+        klasse: trimmedClass,
+        subject: assignment.subject,
+        fromBlokk: 0,
+        toBlokk: assignment.blokkNumber,
+        reason: `Elever: la til ${assignment.subject} i Blokk ${assignment.blokkNumber} for ny elev`,
+        changedAt: new Date().toISOString(),
+      })),
+    ];
+
+    onStudentDataUpdate(nextData, changes);
+    setSelectedStudentId(uniqueId);
+    closeAddStudentModal();
+    applyStatusMessage(`La til ${trimmedName}`);
+  };
+
   const openEditAssignment = (assignment: AssignmentEntry, rowKey: string) => {
     const subject = assignment.subject;
     const blokkNumber = assignment.blokkNumber;
@@ -1026,7 +1231,8 @@ export const EleverView = ({
     <div className={styles.wrapper}>
       <div className={styles.filterGroup}>
         <div className={styles.filterLabel}>Elevfilter</div>
-        <div className={styles.filters}>
+        <div className={styles.filtersRow}>
+          <div className={styles.filters}>
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'all' ? styles.filterButtonActive : ''}`.trim()}
@@ -1066,6 +1272,10 @@ export const EleverView = ({
           >
             Duplikater ({counts.duplicates})
           </button>
+          </div>
+          <button type="button" className={styles.addStudentButton} onClick={openAddStudentModal}>
+            Legg til elev
+          </button>
         </div>
       </div>
 
@@ -1090,9 +1300,17 @@ export const EleverView = ({
                 className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''}`.trim()}
                 onClick={() => setSelectedStudentId(entry.studentId)}
               >
-                <span className={styles.studentName}>{entry.student.navn || 'Ukjent elev'}</span>
+                <span className={styles.studentName}>
+                  {entry.student.navn || 'Ukjent elev'}
+                  {isManualStudentId(entry.studentId) ? (
+                    <span className={styles.manualBadge} title="Manuelt lagt til" aria-label="Manuelt lagt til">
+                      +
+                    </span>
+                  ) : null}
+                </span>
                 <small className={styles.studentMeta}>
                   {entry.student.klasse || 'Ingen klasse'} | {entry.assignments.length} fag
+                  {entry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
                 </small>
               </button>
             ))}
@@ -1106,8 +1324,18 @@ export const EleverView = ({
             <>
               <div className={styles.studentHeader}>
                 <div>
-                  <h3>{selectedStudentEntry.student.navn || 'Ukjent elev'}</h3>
-                  <p>{selectedStudentEntry.student.klasse || 'Ingen klasse'}</p>
+                  <h3>
+                    {selectedStudentEntry.student.navn || 'Ukjent elev'}
+                    {isManualStudentId(selectedStudentEntry.studentId) ? (
+                      <span className={styles.manualBadge} title="Manuelt lagt til" aria-label="Manuelt lagt til">
+                        +
+                      </span>
+                    ) : null}
+                  </h3>
+                  <p>
+                    {selectedStudentEntry.student.klasse || 'Ingen klasse'}
+                    {selectedStudentEntry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
+                  </p>
                 </div>
               </div>
 
@@ -1388,6 +1616,139 @@ export const EleverView = ({
           )}
         </section>
       </div>
+
+      {showAddStudentModal && (
+        <div className={`${styles.modalOverlay} ${styles.modalOverlayCentered}`.trim()}>
+          <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+            <h4>Legg til elev</h4>
+
+            {newStudentModalStatus && <p className={styles.statusMessage}>{newStudentModalStatus}</p>}
+
+            <div className={styles.modalRow}>
+              <label className={styles.modalLabel} htmlFor="add-student-name">Navn</label>
+              <input
+                id="add-student-name"
+                type="text"
+                className={styles.subjectInput}
+                value={newStudentName}
+                onChange={(event) => setNewStudentName(event.target.value)}
+                placeholder="Skriv elevnavn"
+              />
+            </div>
+
+            <div className={styles.modalRow}>
+              <label className={styles.modalLabel} htmlFor="add-student-class">Klasse</label>
+              <input
+                id="add-student-class"
+                type="text"
+                className={styles.subjectInput}
+                value={newStudentClass}
+                onChange={(event) => setNewStudentClass(event.target.value)}
+                list="add-student-class-options"
+                placeholder="Velg eller skriv klasse"
+              />
+              <datalist id="add-student-class-options">
+                {classOptions.map((className) => (
+                  <option key={`class-${className}`} value={className} />
+                ))}
+              </datalist>
+            </div>
+
+            <div className={styles.modalRow}>
+              <label className={styles.checkboxLabel} htmlFor="add-student-fourth-year">
+                <input
+                  id="add-student-fourth-year"
+                  type="checkbox"
+                  checked={newStudentIsFourthYear}
+                  onChange={(event) => setNewStudentIsFourthYear(event.target.checked)}
+                />
+                Fjerdeårs-elev (teller som både VG2 og VG3 i balansering)
+              </label>
+            </div>
+
+            <div className={styles.modalRow}>
+              <label className={styles.modalLabel} htmlFor="add-student-subject">Legg til fag og blokk</label>
+              <div className={styles.studentQueueControls}>
+                <select
+                  id="add-student-subject"
+                  className={styles.moveSelect}
+                  value={newStudentSubjectToAdd}
+                  onChange={(event) => setNewStudentSubjectToAdd(event.target.value)}
+                >
+                  {sortedSubjectOptions.map((subject) => (
+                    <option key={`new-student-subject-${subject}`} value={subject}>
+                      {subject}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  id="add-student-blokk"
+                  className={styles.moveSelect}
+                  value={newStudentBlokkToAdd}
+                  onChange={(event) => setNewStudentBlokkToAdd(event.target.value)}
+                  disabled={newStudentAddBlokkOptions.length === 0}
+                >
+                  {newStudentAddBlokkOptions.length === 0 ? (
+                    <option value="">Ingen blokker for valgt fag</option>
+                  ) : (
+                    newStudentAddBlokkOptions.map((blokk) => (
+                      <option key={`new-student-blokk-${blokk}`} value={String(blokk)}>
+                        Blokk {blokk}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  type="button"
+                  className={styles.moveButton}
+                  onClick={handleQueueStudentSubject}
+                >
+                  Legg til
+                </button>
+              </div>
+            </div>
+
+            <div className={styles.modalRow}>
+              <div className={styles.modalLabel}>Fag som legges til ({newStudentAssignments.length})</div>
+              {newStudentAssignments.length === 0 ? (
+                <p className={styles.empty}>Ingen fag lagt til ennå.</p>
+              ) : (
+                <ul className={styles.pendingAssignmentsList}>
+                  {newStudentAssignments.map((assignment) => (
+                    <li key={assignment.id}>
+                      <span>{assignment.subject} - Blokk {assignment.blokkNumber}</span>
+                      <button
+                        type="button"
+                        className={styles.removeButton}
+                        onClick={() => handleRemoveQueuedStudentSubject(assignment.id)}
+                      >
+                        Fjern
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.removeButton}
+                onClick={closeAddStudentModal}
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                className={styles.moveButton}
+                onClick={handleCreateStudent}
+              >
+                Opprett elev
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

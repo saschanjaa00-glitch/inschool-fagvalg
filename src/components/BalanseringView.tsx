@@ -87,29 +87,34 @@ const normalizeRestrictions = (input: ClassBlockRestrictions): ClassBlockRestric
   return next;
 };
 
-const inferClassLevel = (classGroup: string | null | undefined): string | null => {
+const inferClassLevels = (row: StandardField): string[] => {
+  if (row.fjerdearsElev) {
+    return ['VG2', 'VG3'];
+  }
+
+  const classGroup = row.klasse;
   const normalized = (classGroup || '').trim().toUpperCase();
   if (normalized.length === 0) {
-    return null;
+    return [];
   }
 
   const match = normalized.match(/^(\d)/);
   if (!match) {
-    return DEFAULT_CLASS_LEVELS.includes(normalized) ? normalized : null;
+    return DEFAULT_CLASS_LEVELS.includes(normalized) ? [normalized] : [];
   }
 
   const year = Number.parseInt(match[1], 10);
   if (year === 1) {
-    return 'VG1';
+    return ['VG1'];
   }
   if (year === 2) {
-    return 'VG2';
+    return ['VG2'];
   }
   if (year >= 3) {
-    return 'VG3';
+    return ['VG3'];
   }
 
-  return null;
+  return [];
 };
 
 type BalancePresetMode = 'even' | 'underMax' | 'advanced';
@@ -147,10 +152,7 @@ export const BalanseringView = ({
     const levels = new Set<string>();
 
     mergedData.forEach((row) => {
-      const classLevel = inferClassLevel(row.klasse);
-      if (classLevel) {
-        levels.add(classLevel);
-      }
+      inferClassLevels(row).forEach((classLevel) => levels.add(classLevel));
     });
 
     const orderedLevels = DEFAULT_CLASS_LEVELS.filter((level) => levels.has(level));
