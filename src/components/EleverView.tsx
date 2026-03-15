@@ -148,11 +148,14 @@ const matchesSearch = (student: StandardField, query: string, index: number): bo
     return true;
   }
 
-  const id = getStudentId(student, index).toLocaleLowerCase('nb');
-  const navn = (student.navn || '').toLocaleLowerCase('nb');
-  const klasse = (student.klasse || '').toLocaleLowerCase('nb');
+  const tokens = trimmedQuery.split(/\s+/).filter((token) => token.length > 0);
+  const searchableValues = [
+    getStudentId(student, index).toLocaleLowerCase('nb'),
+    (student.navn || '').toLocaleLowerCase('nb'),
+    (student.klasse || '').toLocaleLowerCase('nb'),
+  ];
 
-  return navn.includes(trimmedQuery) || klasse.includes(trimmedQuery) || id.includes(trimmedQuery);
+  return tokens.every((token) => searchableValues.some((value) => value.includes(token)));
 };
 
 const formatTimestamp = (iso: string): string => {
