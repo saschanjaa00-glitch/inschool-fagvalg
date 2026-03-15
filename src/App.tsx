@@ -52,6 +52,8 @@ interface WarningIgnoreEntry {
   ignoredAt: string;
 }
 
+type GroupSubview = 'subjects' | 'groups';
+
 function App() {
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
   const [mappings, setMappings] = useState<Map<string, ColumnMapping>>(new Map());
@@ -65,6 +67,7 @@ function App() {
   const [activeDataTab, setActiveDataTab] = useState<
     'import' | 'subjects' | 'groups' | 'students' | 'elever' | 'balancing' | 'changelog'
   >('import');
+  const [activeGroupTab, setActiveGroupTab] = useState<GroupSubview>('subjects');
   const [warningExpanded, setWarningExpanded] = useState(false);
   const [warningBlokkCollisionExpanded, setWarningBlokkCollisionExpanded] = useState(false);
   const [warningFewSubjectsExpanded, setWarningFewSubjectsExpanded] = useState(false);
@@ -82,6 +85,12 @@ function App() {
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
   const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
   const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
+
+  useEffect(() => {
+    if (activeDataTab === 'subjects' || activeDataTab === 'groups') {
+      setActiveGroupTab(activeDataTab);
+    }
+  }, [activeDataTab]);
 
   useEffect(() => {
     try {
@@ -949,18 +958,9 @@ function App() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeDataTab === 'subjects'}
-                  className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('subjects')}
-                >
-                  Blokkoversikt
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDataTab === 'groups'}
-                  className={`data-tab ${activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
-                  onClick={() => setActiveDataTab('groups')}
+                  aria-selected={activeDataTab === 'subjects' || activeDataTab === 'groups'}
+                  className={`data-tab ${activeDataTab === 'subjects' || activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
+                  onClick={() => setActiveDataTab(activeGroupTab)}
                 >
                   Grupper
                 </button>
@@ -1001,6 +1001,34 @@ function App() {
                   Elevtabell
                 </button>
               </div>
+              {(activeDataTab === 'subjects' || activeDataTab === 'groups') && (
+                <div className="data-tabs data-subtabs" role="tablist" aria-label="Grupper visning">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeDataTab === 'subjects'}
+                    className={`data-tab ${activeDataTab === 'subjects' ? 'data-tab-active' : ''}`.trim()}
+                    onClick={() => {
+                      setActiveGroupTab('subjects');
+                      setActiveDataTab('subjects');
+                    }}
+                  >
+                    Blokkoversikt
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeDataTab === 'groups'}
+                    className={`data-tab ${activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
+                    onClick={() => {
+                      setActiveGroupTab('groups');
+                      setActiveDataTab('groups');
+                    }}
+                  >
+                    Gruppeoversikt
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="data-tab-panel">
