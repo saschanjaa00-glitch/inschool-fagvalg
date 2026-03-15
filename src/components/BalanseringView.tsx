@@ -115,6 +115,7 @@ const inferClassLevel = (classGroup: string | null | undefined): string | null =
 type BalancePresetMode = 'even' | 'underMax' | 'advanced';
 
 const EVEN_PRESET_MAX_RELAXATION = 20;
+const UNDER_MAX_PRESET_MAX_RELAXATION = 6;
 const EVEN_BALANCE_OFFSETS: number[] = [20, 15, 10, 8, 6, 4, 2, 0];
 
 export const BalanseringView = ({
@@ -259,7 +260,7 @@ export const BalanseringView = ({
       presetMode === 'even'
         ? EVEN_PRESET_MAX_RELAXATION
         : presetMode === 'underMax'
-          ? 2
+          ? UNDER_MAX_PRESET_MAX_RELAXATION
           : parsedMaxRelaxation;
 
     const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
@@ -347,7 +348,7 @@ export const BalanseringView = ({
     }
 
     if (mode === 'underMax') {
-      setMaxRelaxation('2');
+      setMaxRelaxation(String(UNDER_MAX_PRESET_MAX_RELAXATION));
       setParametersExpanded(false);
       return;
     }
