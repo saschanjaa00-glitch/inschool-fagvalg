@@ -1,5 +1,9 @@
 .wrapper {
   width: 100%;
+  --elever-handling-col-width: 140px;
+  --elever-table-cell-padding-x: 8px;
+  --elever-actions-gap: 6px;
+  --elever-handling-inner-width: calc(var(--elever-handling-col-width) - (var(--elever-table-cell-padding-x) * 2));
 }
 
 .filterGroup {
@@ -204,9 +208,9 @@
 
 .addBar {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
+  justify-content: flex-start;
+  width: var(--elever-handling-inner-width);
+  margin: 8px 0 10px calc(100% - var(--elever-handling-col-width) + var(--elever-table-cell-padding-x));
 }
 
 .subjectInput {
@@ -232,6 +236,7 @@
 }
 
 .addButton {
+  width: 100%;
   padding: 5px 8px;
   border: 1px solid #5f9b73;
   background: #72ae86;
@@ -244,12 +249,6 @@
 
 .addButton:hover {
   background: #669d79;
-}
-
-.addBar {
-  display: flex;
-  justify-content: flex-end;
-  margin: 8px 0 10px;
 }
 
 .statusMessage {
@@ -279,7 +278,7 @@
 }
 
 .handlingColumn {
-  width: 140px;
+  width: var(--elever-handling-col-width);
 }
 
 .assignmentTable th {
@@ -329,9 +328,17 @@
 
 .actionsButtons {
   display: flex;
-  gap: 6px;
+  gap: var(--elever-actions-gap);
   align-items: center;
   flex-wrap: nowrap;
+  width: var(--elever-handling-inner-width);
+}
+
+.actionsButtons .moveButton,
+.actionsButtons .removeButton {
+  flex: 0 0 calc((var(--elever-handling-inner-width) - var(--elever-actions-gap)) / 2);
+  width: calc((var(--elever-handling-inner-width) - var(--elever-actions-gap)) / 2);
+  text-align: center;
 }
 
 .moveButton {
