@@ -137,6 +137,7 @@ export const BalanseringView = ({
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [lastResult, setLastResult] = useState<ProgressiveHybridBalanceResult | null>(null);
+  const [isBalancing, setIsBalancing] = useState(false);
 
   const effectiveRestrictions = useMemo(() => normalizeRestrictions(restrictions), [restrictions]);
   const visibleClassLevels = useMemo(() => {
@@ -181,56 +182,70 @@ export const BalanseringView = ({
   }, [hasAnyAllowedRestriction]);
 
   const runBalancing = () => {
+    if (isBalancing) {
+      return;
+    }
+
     if (mergedData.length === 0) {
       setStatusMessage('Ingen elevdata a balansere. Last inn data forst.');
       return;
     }
 
-    const parsedMaxRelaxation = Math.max(
-      0,
-      Math.floor(parseInputNumber(maxRelaxation, DEFAULT_BALANCING_CONFIG.maxRelaxation))
-    );
+    setIsBalancing(true);
+    setStatusMessage('Balanserer...');
 
-    const effectiveMaxRelaxation =
-      presetMode === 'even'
-        ? EVEN_PRESET_MAX_RELAXATION
-        : presetMode === 'underMax'
-          ? 2
-          : parsedMaxRelaxation;
+    // Let React paint the loading overlay before heavy work starts.
+    window.setTimeout(() => {
+      try {
+        const parsedMaxRelaxation = Math.max(
+          0,
+          Math.floor(parseInputNumber(maxRelaxation, DEFAULT_BALANCING_CONFIG.maxRelaxation))
+        );
 
-    const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
+        const effectiveMaxRelaxation =
+          presetMode === 'even'
+            ? EVEN_PRESET_MAX_RELAXATION
+            : presetMode === 'underMax'
+              ? 2
+              : parsedMaxRelaxation;
 
-    const config: Partial<BalancingConfig> = {
-      weights: {
-        ...weights,
-        collisionD: FIXED_COLLISION_WEIGHT,
-      },
-      maxRelaxation: effectiveMaxRelaxation,
-      capacityOffsets,
-      maxPassMillis: Math.max(200, Math.floor(parseInputNumber(maxPassMillis, DEFAULT_BALANCING_CONFIG.maxPassMillis))),
-      maxLookaheadAttempts: Math.max(
-        0,
-        Math.floor(parseInputNumber(maxLookaheadAttempts, DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts))
-      ),
-      maxDepth2Chains: Math.max(0, Math.floor(parseInputNumber(maxDepth2Chains, DEFAULT_BALANCING_CONFIG.maxDepth2Chains))),
-      classBlockRestrictions: effectiveRestrictions,
-      excludedSubjects,
-    };
+        const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
 
-    const result = progressiveHybridBalance(mergedData, subjectSettingsByName, config);
-    setLastResult(result);
-    onApplyResult(result);
+        const config: Partial<BalancingConfig> = {
+          weights: {
+            ...weights,
+            collisionD: FIXED_COLLISION_WEIGHT,
+          },
+          maxRelaxation: effectiveMaxRelaxation,
+          capacityOffsets,
+          maxPassMillis: Math.max(200, Math.floor(parseInputNumber(maxPassMillis, DEFAULT_BALANCING_CONFIG.maxPassMillis))),
+          maxLookaheadAttempts: Math.max(
+            0,
+            Math.floor(parseInputNumber(maxLookaheadAttempts, DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts))
+          ),
+          maxDepth2Chains: Math.max(0, Math.floor(parseInputNumber(maxDepth2Chains, DEFAULT_BALANCING_CONFIG.maxDepth2Chains))),
+          classBlockRestrictions: effectiveRestrictions,
+          excludedSubjects,
+        };
 
-    const unresolvedCollisionCount = result.diagnostics.unresolvedCollisions.length;
-    setStatusMessage(
-      `Kjort ferdig: ${result.diagnostics.moveCount} flytt, ${result.diagnostics.uniqueStudentsMoved} elever, score ${formatNumber(
-        result.diagnostics.beforeScore.total
-      )} -> ${formatNumber(result.diagnostics.afterScore.total)}${
-        unresolvedCollisionCount > 0
-          ? `, ADVARSEL: ${unresolvedCollisionCount} elevfag kan ikke plasseres uten kollisjon (se logg)`
-          : ''
-      }`
-    );
+        const result = progressiveHybridBalance(mergedData, subjectSettingsByName, config);
+        setLastResult(result);
+        onApplyResult(result);
+
+        const unresolvedCollisionCount = result.diagnostics.unresolvedCollisions.length;
+        setStatusMessage(
+          `Kjort ferdig: ${result.diagnostics.moveCount} flytt, ${result.diagnostics.uniqueStudentsMoved} elever, score ${formatNumber(
+            result.diagnostics.beforeScore.total
+          )} -> ${formatNumber(result.diagnostics.afterScore.total)}${
+            unresolvedCollisionCount > 0
+              ? `, ADVARSEL: ${unresolvedCollisionCount} elevfag kan ikke plasseres uten kollisjon (se logg)`
+              : ''
+          }`
+        );
+      } finally {
+        setIsBalancing(false);
+      }
+    }, 20);
   };
 
   const updateRestriction = (classKey: string, block: BlockNumber, allowed: boolean) => {
@@ -291,6 +306,20 @@ export const BalanseringView = ({
 
   return (
     <div className={styles.wrapper}>
+      {isBalancing && (
+        <div className={styles.balanceOverlay} role="status" aria-live="polite" aria-busy="true">
+          <div className={styles.balanceOverlayCard}>
+            <h4>Balanserer data...</h4>
+            <div className={styles.juggleTrack}>
+              <span className={`${styles.juggleBall} ${styles.juggleBallOne}`.trim()} />
+              <span className={`${styles.juggleBall} ${styles.juggleBallTwo}`.trim()} />
+              <span className={`${styles.juggleBall} ${styles.juggleBallThree}`.trim()} />
+            </div>
+            <p>Jobber med fordeling av elever i grupper.</p>
+          </div>
+        </div>
+      )}
+
       <section className={styles.card}>
         <h3>Hybrid balansering</h3>
         <p className={styles.description}>
@@ -580,7 +609,7 @@ export const BalanseringView = ({
             type="button"
             className={styles.primaryBtn}
             onClick={runBalancing}
-            disabled={!hasAnyAllowedRestriction}
+            disabled={!hasAnyAllowedRestriction || isBalancing}
             title={!hasAnyAllowedRestriction ? 'Aktiver minst én blokk først' : undefined}
           >
             Kjør balansering

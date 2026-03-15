@@ -1,6 +1,83 @@
 .wrapper {
   display: grid;
   gap: 12px;
+  position: relative;
+}
+
+.balanceOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 22, 36, 0.42);
+  display: grid;
+  place-items: center;
+  z-index: 1200;
+  backdrop-filter: blur(2px);
+}
+
+.balanceOverlayCard {
+  width: min(420px, calc(100vw - 28px));
+  border: 1px solid #bcd0e6;
+  border-radius: 12px;
+  padding: 18px;
+  background: #fdfefe;
+  box-shadow: 0 14px 36px rgba(11, 33, 56, 0.24);
+  text-align: center;
+}
+
+.balanceOverlayCard h4 {
+  margin: 0 0 10px;
+  color: #133e6f;
+}
+
+.balanceOverlayCard p {
+  margin: 10px 0 0;
+  color: #4b6079;
+  font-size: 13px;
+}
+
+.juggleTrack {
+  position: relative;
+  height: 44px;
+  margin: 0 auto;
+  width: 136px;
+}
+
+.juggleBall {
+  position: absolute;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 28%, #ffffff 0%, #7fd2f9 36%, #2f80c5 100%);
+  box-shadow: 0 3px 8px rgba(20, 69, 112, 0.35);
+  animation: juggleArc 1.05s ease-in-out infinite;
+}
+
+.juggleBallOne {
+  left: 18px;
+  animation-delay: 0s;
+}
+
+.juggleBallTwo {
+  left: 61px;
+  animation-delay: 0.16s;
+}
+
+.juggleBallThree {
+  left: 104px;
+  animation-delay: 0.32s;
+}
+
+@keyframes juggleArc {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.88;
+  }
+  45% {
+    transform: translateY(-24px) scale(1.04);
+    opacity: 1;
+  }
 }
 
 .card {
