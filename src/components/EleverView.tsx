@@ -200,7 +200,12 @@ export const EleverView = ({
   const [warningIgnoreDraftByType, setWarningIgnoreDraftByType] = useState<Partial<Record<WarningType, string>>>({});
   const [statusMessage, setStatusMessage] = useState('');
   const [editAssignment, setEditAssignment] = useState<EditAssignmentState | null>(null);
+  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
+
+  const sortedSubjectOptions = useMemo(() => {
+    return subjectOptions.slice().sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
+  }, [subjectOptions]);
 
   const studentSummaries = useMemo(() => {
     return data.map((student, index) => {
@@ -269,6 +274,9 @@ export const EleverView = ({
 
   useEffect(() => {
     setEditAssignment(null);
+    setShowAddSubjectModal(false);
+    setSubjectToAdd('');
+    setBlokkToAdd('');
     setWarningIgnoreDraftByType({});
     setLogExpanded(false);
   }, [selectedStudentId]);
@@ -617,11 +625,7 @@ export const EleverView = ({
   }, [changeLog, selectedStudentEntry]);
 
   const visibleStudentChanges = useMemo(() => {
-    if (logExpanded) {
-      return selectedStudentChanges;
-    }
-
-    return selectedStudentChanges.slice(0, 4);
+    return logExpanded ? selectedStudentChanges : [];
   }, [logExpanded, selectedStudentChanges]);
 
   const applyStatusMessage = (message: string) => {
@@ -752,9 +756,22 @@ export const EleverView = ({
 
     onStudentDataUpdate(nextData, [change]);
     saveSubjectGroupAssignment(normalizedSubject, selectedStudentEntry.studentId, selectedGroupId);
+    setShowAddSubjectModal(false);
     setSubjectToAdd('');
     setBlokkToAdd('');
     applyStatusMessage(`${normalizedSubject} lagt til i Blokk ${blokkNumber}`);
+  };
+
+  const openAddSubjectModal = () => {
+    if (!selectedStudentEntry) {
+      return;
+    }
+
+    if (!subjectToAdd && sortedSubjectOptions.length > 0) {
+      setSubjectToAdd(sortedSubjectOptions[0]);
+    }
+
+    setShowAddSubjectModal(true);
   };
 
   const openEditAssignment = (assignment: AssignmentEntry, rowKey: string) => {
@@ -1043,47 +1060,6 @@ export const EleverView = ({
                 </div>
               )}
 
-              <div className={styles.addBar}>
-                <input
-                  type="text"
-                  list="elever-subject-options"
-                  value={subjectToAdd}
-                  onChange={(event) => setSubjectToAdd(event.target.value)}
-                  placeholder="Legg til fag"
-                  className={styles.subjectInput}
-                />
-                <datalist id="elever-subject-options">
-                  {subjectOptions.slice().sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' })).map((subject) => (
-                    <option key={subject} value={subject} />
-                  ))}
-                </datalist>
-                <select
-                  value={blokkToAdd}
-                  onChange={(event) => setBlokkToAdd(event.target.value)}
-                  className={styles.blokkSelect}
-                  disabled={addBlokkOptions.length === 0}
-                >
-                  {addBlokkOptions.length === 0 ? (
-                    <option value="">Ingen blokker for valgt fag</option>
-                  ) : (
-                    addBlokkOptions.map((blokk) => {
-                      const totals = getSubjectTotalsForBlokk(subjectToAdd.trim(), blokk);
-                      const students = totals?.students ?? 0;
-                      const spaces = totals?.spaces ?? 0;
-
-                      return (
-                        <option key={`add-blokk-${blokk}`} value={String(blokk)}>
-                          Blokk {blokk} ({students} / {spaces})
-                        </option>
-                      );
-                    })
-                  )}
-                </select>
-                <button type="button" className={styles.addButton} onClick={handleAddSubject}>
-                  Legg til
-                </button>
-              </div>
-
               {statusMessage && <p className={styles.statusMessage}>{statusMessage}</p>}
 
               <table className={styles.assignmentTable}>
@@ -1139,6 +1115,12 @@ export const EleverView = ({
                   )}
                 </tbody>
               </table>
+
+              <div className={styles.addBar}>
+                <button type="button" className={styles.addButton} onClick={openAddSubjectModal}>
+                  Legg til fag
+                </button>
+              </div>
 
               {editAssignment && (
                 <div className={styles.modalOverlay} onClick={() => setEditAssignment(null)}>
@@ -1205,32 +1187,93 @@ export const EleverView = ({
                 </div>
               )}
 
+              {showAddSubjectModal && (
+                <div className={styles.modalOverlay} onClick={() => setShowAddSubjectModal(false)}>
+                  <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+                    <h4>Legg til fag</h4>
+                    <div className={styles.modalRow}>
+                      <label className={styles.modalLabel} htmlFor="add-subject-select">Fag</label>
+                      <select
+                        id="add-subject-select"
+                        className={styles.moveSelect}
+                        value={subjectToAdd}
+                        onChange={(event) => setSubjectToAdd(event.target.value)}
+                      >
+                        {sortedSubjectOptions.map((subject) => (
+                          <option key={`add-subject-${subject}`} value={subject}>
+                            {subject}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className={styles.modalRow}>
+                      <label className={styles.modalLabel} htmlFor="add-blokk-select">Blokk</label>
+                      <select
+                        id="add-blokk-select"
+                        className={styles.moveSelect}
+                        value={blokkToAdd}
+                        onChange={(event) => setBlokkToAdd(event.target.value)}
+                        disabled={addBlokkOptions.length === 0}
+                      >
+                        {addBlokkOptions.length === 0 ? (
+                          <option value="">Ingen blokker for valgt fag</option>
+                        ) : (
+                          addBlokkOptions.map((blokk) => {
+                            const totals = getSubjectTotalsForBlokk(subjectToAdd.trim(), blokk);
+                            const students = totals?.students ?? 0;
+                            const spaces = totals?.spaces ?? 0;
+
+                            return (
+                              <option key={`add-blokk-${blokk}`} value={String(blokk)}>
+                                Blokk {blokk} ({students} / {spaces})
+                              </option>
+                            );
+                          })
+                        )}
+                      </select>
+                    </div>
+                    <div className={styles.modalActions}>
+                      <button
+                        type="button"
+                        className={styles.removeButton}
+                        onClick={() => setShowAddSubjectModal(false)}
+                      >
+                        Avbryt
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.moveButton}
+                        onClick={handleAddSubject}
+                      >
+                        Legg til
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className={styles.logPanel}>
-                <h4>Endringslogg ({selectedStudentChanges.length})</h4>
-                {selectedStudentChanges.length === 0 ? (
-                  <p className={styles.logEmpty}>Ingen endringer registrert for denne eleven ennå.</p>
-                ) : (
-                  <>
-                  <ul className={styles.logList}>
-                    {visibleStudentChanges.map((change, index) => (
-                      <li key={`${change.changedAt}-${index}`}>
-                        <span title={change.reason}>{change.subject ? <strong>{change.subject}</strong> : null}{change.subject ? ': ' : ''}{formatChangeLabel(change)}</span>
-                        <small>{formatTimestamp(change.changedAt)}</small>
-                      </li>
-                    ))}
-                  </ul>
-                  {selectedStudentChanges.length > 4 && (
-                    <button
-                      type="button"
-                      className={styles.logToggleButton}
-                      onClick={() => setLogExpanded((prev) => !prev)}
-                    >
-                      {logExpanded
-                        ? 'Vis mindre'
-                        : `Vis flere (${selectedStudentChanges.length - visibleStudentChanges.length})`}
-                    </button>
-                  )}
-                  </>
+                <button
+                  type="button"
+                  className={styles.logHeaderButton}
+                  onClick={() => setLogExpanded((prev) => !prev)}
+                >
+                  <span>Endringslogg ({selectedStudentChanges.length})</span>
+                  <span className={styles.logHeaderChevron}>{logExpanded ? '−' : '+'}</span>
+                </button>
+                {logExpanded && (
+                  selectedStudentChanges.length === 0 ? (
+                    <p className={styles.logEmpty}>Ingen endringer registrert for denne eleven ennå.</p>
+                  ) : (
+                    <ul className={styles.logList}>
+                      {visibleStudentChanges.map((change, index) => (
+                        <li key={`${change.changedAt}-${index}`}>
+                          <span title={change.reason}>{change.subject ? <strong>{change.subject}</strong> : null}{change.subject ? ': ' : ''}{formatChangeLabel(change)}</span>
+                          <small>{formatTimestamp(change.changedAt)}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 )}
               </div>
             </>

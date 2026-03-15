@@ -4,10 +4,6 @@
 
 .filterGroup {
   margin-bottom: 10px;
-  padding: 8px 10px;
-  border: 1px solid #dbe7f5;
-  border-radius: 8px;
-  background: #f4f8fd;
 }
 
 .filterLabel {
@@ -15,15 +11,14 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #4f6785;
-  margin-bottom: 6px;
+  color: #6a6a6a;
+  margin-bottom: 5px;
 }
 
 .filters {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 0;
 }
 
 .filterButton {
@@ -55,7 +50,7 @@
 .viewerGrid {
   display: grid;
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .listPanel,
@@ -134,34 +129,34 @@
 }
 
 .warningIgnorePanel {
-  border: 1px solid #e7c873;
-  background: #fff8e1;
+  background: #fcfaf2;
+  border: 1px solid #ece4c7;
   border-radius: 6px;
-  padding: 8px;
+  padding: 6px 8px;
   margin-bottom: 8px;
 }
 
 .warningIgnoreRow {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .warningIgnoreRow + .warningIgnoreRow {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #ecd695;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #eee6ca;
 }
 
 .warningIgnoreTitle {
-  font-size: 12px;
-  color: #7c6200;
+  font-size: 11px;
+  color: #7b7359;
   font-weight: 700;
 }
 
 .warningIgnoreControls {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -169,32 +164,32 @@
 .warningIgnoreInput {
   flex: 1;
   min-width: 220px;
-  padding: 5px 7px;
-  border: 1px solid #dcbf6e;
+  padding: 4px 6px;
+  border: 1px solid #ddd3af;
   border-radius: 4px;
-  font-size: 12px;
-  background: #fffef9;
-  color: #333;
+  font-size: 11px;
+  background: #fffdf8;
+  color: #535353;
 }
 
 .warningIgnoreInput:focus {
   outline: none;
-  border-color: #c9a74a;
+  border-color: #c9bc8f;
 }
 
 .warningIgnoreButton {
-  padding: 5px 8px;
-  border: 1px solid #c89b1f;
-  background: #fff1c7;
-  color: #6d5400;
+  padding: 4px 7px;
+  border: 1px solid #d8cdab;
+  background: #f8f3e3;
+  color: #756b4f;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .warningIgnoreButton:hover:not(:disabled) {
-  background: #ffe8a3;
+  background: #f1ead3;
 }
 
 .warningIgnoreButton:disabled {
@@ -203,8 +198,8 @@
 }
 
 .warningIgnoredLabel {
-  font-size: 12px;
-  color: #6d5400;
+  font-size: 11px;
+  color: #7b7359;
 }
 
 .addBar {
@@ -237,18 +232,24 @@
 }
 
 .addButton {
-  padding: 7px 10px;
-  border: 1px solid #2f669d;
-  background: #3d7ec0;
+  padding: 5px 8px;
+  border: 1px solid #5f9b73;
+  background: #72ae86;
   color: #ffffff;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .addButton:hover {
-  background: #356ea8;
+  background: #669d79;
+}
+
+.addBar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 10px;
 }
 
 .statusMessage {
@@ -387,31 +388,46 @@
 }
 
 .logPanel {
-  border: 1px solid #e0e0e0;
+  border: 1px solid #eceff3;
   border-radius: 6px;
-  background: #ffffff;
-  padding: 8px;
+  background: #fafbfc;
+  padding: 6px 8px;
 }
 
-.logPanel h4 {
-  margin: 0 0 6px;
+.logHeaderButton {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #6f7c89;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.logHeaderChevron {
   font-size: 13px;
-  color: #222;
+  line-height: 1;
+  color: #9aa5b1;
 }
 
 .logEmpty {
-  margin: 0;
-  color: #777;
-  font-size: 12px;
+  margin: 6px 0 0;
+  color: #8a95a3;
+  font-size: 11px;
 }
 
 .logList {
   list-style: none;
-  margin: 0;
+  margin: 6px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .logList li {
@@ -419,34 +435,18 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
-  padding: 6px;
-  border: 1px solid #ebebeb;
+  padding: 5px 6px;
+  border: 1px solid #eef1f4;
   border-radius: 4px;
-  background: #fbfbfb;
-  font-size: 12px;
-  color: #333;
+  background: #fcfcfd;
+  font-size: 11px;
+  color: #596574;
 }
 
 .logList small {
   flex-shrink: 0;
-  color: #666;
-  font-size: 11px;
-}
-
-.logToggleButton {
-  margin-top: 8px;
-  border: 1px solid #c9d8ea;
-  background: #f3f8ff;
-  color: #2f5f93;
-  border-radius: 4px;
-  padding: 5px 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.logToggleButton:hover {
-  background: #e8f1ff;
+  color: #8a95a3;
+  font-size: 10px;
 }
 
 .empty {
