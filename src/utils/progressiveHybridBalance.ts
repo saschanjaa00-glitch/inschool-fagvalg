@@ -117,7 +117,7 @@ export interface BalancingConfig {
   epsilon: number;
   maxRelaxation: number;
   capacityOffsets?: number[];
-  maxPassMillis: number;
+  maxFlowIterationsPerOffset: number;
   maxLookaheadAttempts: number;
   maxDepth2Chains: number;
   classBlockRestrictions: ClassBlockRestrictions;
@@ -212,7 +212,7 @@ export const DEFAULT_BALANCING_CONFIG: BalancingConfig = {
   weights: DEFAULT_WEIGHTS,
   epsilon: 0.0001,
   maxRelaxation: 10,
-  maxPassMillis: 3000,
+  maxFlowIterationsPerOffset: 250,
   maxLookaheadAttempts: 300,
   maxDepth2Chains: 150,
   classBlockRestrictions: DEFAULT_CLASS_BLOCK_RESTRICTIONS,
@@ -2104,24 +2104,16 @@ export const progressiveHybridBalance = (
   let lookaheadSuccess = 0;
   let lookaheadRollback = 0;
 
-  const startTime = Date.now();
   const capacityOffsets = normalizeCapacityOffsets(mergedConfig.capacityOffsets, mergedConfig.maxRelaxation);
-  const totalBudgetMillis = mergedConfig.maxPassMillis * capacityOffsets.length;
 
   for (const offset of capacityOffsets) {
-    if (Date.now() - startTime > totalBudgetMillis) {
-      break;
-    }
-
     passesRun += 1;
     repairOvercapacity(state, mergedConfig, offset);
     let improving = true;
+    let flowIterations = 0;
 
-    while (improving) {
-      if (Date.now() - startTime > totalBudgetMillis) {
-        improving = false;
-        break;
-      }
+    while (improving && flowIterations < mergedConfig.maxFlowIterationsPerOffset) {
+      flowIterations += 1;
 
       const flow = buildFlowNetwork(state, mergedConfig, offset);
       const solved = solveFlow(flow);
@@ -2145,8 +2137,7 @@ export const progressiveHybridBalance = (
     }
   }
 
-  // If we never reached offset 0 within the time budget, keep the best progress
-  // we actually computed instead of reverting to the pre-pass state.
+  // If a custom capacity schedule somehow omitted offset 0, keep the best computed state.
   state = cloneState(bestStrictState || state);
 
   const collisionRepair = repairCollisions(state, mergedConfig);

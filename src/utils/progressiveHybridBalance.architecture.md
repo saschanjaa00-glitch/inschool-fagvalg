@@ -69,7 +69,7 @@ Approximate runtime per pass:
 - Local search: bounded by configured attempt caps
 
 Total runtime is bounded in practice by:
-- maxPassMillis
+- maxFlowIterationsPerOffset
 - maxLookaheadAttempts
 - maxDepth2Chains
 

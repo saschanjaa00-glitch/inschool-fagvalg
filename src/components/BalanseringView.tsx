@@ -35,7 +35,7 @@ const SETTING_DESCRIPTIONS = {
   alpha: 'Øker hvor mye store grupper påvirker ubalansestraffen.',
   beta: 'Øker hvor hardt de største gruppene teller i topptrykk-beregningen.',
   maxRelaxation: 'Starter balanseringen så mange plasser under virkelig maks før den gradvis nærmer seg faktisk maks.',
-  maxPassMillis: 'Omtrentlig tidsbudsjett per kapasitetsnivå i balanseringen.',
+  maxFlowIterationsPerOffset: 'Maks antall flyt-iterasjoner som kjores per kapasitetsniva (deterministisk stoppkriterium).',
   maxLookaheadAttempts: 'Hvor mange lookahead-forsøk motoren kan bruke for å finne kjeder av flytt.',
   maxDepth2Chains: 'Maks antall dypere to-stegs kjeder som prøves i lookahead.',
   restrictions: 'Klassebegrensninger styrer hvilke blokker hvert trinn har lov til å bruke.',
@@ -134,7 +134,9 @@ export const BalanseringView = ({
 }: BalanseringViewProps) => {
   const [weights, setWeights] = useState<BalancingWeights>(DEFAULT_BALANCING_CONFIG.weights);
   const [maxRelaxation, setMaxRelaxation] = useState(String(EVEN_PRESET_MAX_RELAXATION));
-  const [maxPassMillis, setMaxPassMillis] = useState(String(DEFAULT_BALANCING_CONFIG.maxPassMillis));
+  const [maxFlowIterationsPerOffset, setMaxFlowIterationsPerOffset] = useState(
+    String(DEFAULT_BALANCING_CONFIG.maxFlowIterationsPerOffset)
+  );
   const [maxLookaheadAttempts, setMaxLookaheadAttempts] = useState(String(DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts));
   const [maxDepth2Chains, setMaxDepth2Chains] = useState(String(DEFAULT_BALANCING_CONFIG.maxDepth2Chains));
   const [presetMode, setPresetMode] = useState<BalancePresetMode>('even');
@@ -274,7 +276,15 @@ export const BalanseringView = ({
       },
       maxRelaxation: effectiveMaxRelaxation,
       capacityOffsets,
-      maxPassMillis: Math.max(200, Math.floor(parseInputNumber(maxPassMillis, DEFAULT_BALANCING_CONFIG.maxPassMillis))),
+      maxFlowIterationsPerOffset: Math.max(
+        1,
+        Math.floor(
+          parseInputNumber(
+            maxFlowIterationsPerOffset,
+            DEFAULT_BALANCING_CONFIG.maxFlowIterationsPerOffset
+          )
+        )
+      ),
       maxLookaheadAttempts: Math.max(
         0,
         Math.floor(parseInputNumber(maxLookaheadAttempts, DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts))
@@ -577,12 +587,12 @@ export const BalanseringView = ({
                 />
               </label>
               <label>
-                Maks tid per pass (ms)
+                Maks flyt-iterasjoner per pass
                 <input
                   type="number"
-                  value={maxPassMillis}
-                  title={SETTING_DESCRIPTIONS.maxPassMillis}
-                  onChange={(event) => setMaxPassMillis(event.target.value)}
+                  value={maxFlowIterationsPerOffset}
+                  title={SETTING_DESCRIPTIONS.maxFlowIterationsPerOffset}
+                  onChange={(event) => setMaxFlowIterationsPerOffset(event.target.value)}
                 />
               </label>
               <label>
