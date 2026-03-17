@@ -10,6 +10,7 @@ import {
   type ProgressiveHybridBalanceResult,
   type SubjectSettingsByNameLike,
 } from '../utils/progressiveHybridBalance';
+import { mapSubjectToCode } from '../utils/subjectCodeMapping';
 import type { BalancingWorkerInbound, BalancingWorkerOutbound } from '../workers/progressiveHybridBalance.worker.types';
 import styles from './BalanseringView.module.css';
 
@@ -18,7 +19,9 @@ interface BalanseringViewProps {
   subjectSettingsByName: SubjectSettingsByNameLike;
   restrictions: ClassBlockRestrictions;
   excludedSubjects: string[];
+  excludedStudentIds: string[];
   onExcludedSubjectsChange: (subjects: string[]) => void;
+  onExcludedStudentIdsChange: (studentIds: string[]) => void;
   onRestrictionsChange: (value: ClassBlockRestrictions) => void;
   onApplyResult: (result: ProgressiveHybridBalanceResult) => void;
 }
@@ -40,6 +43,7 @@ const SETTING_DESCRIPTIONS = {
   maxDepth2Chains: 'Maks antall dypere to-stegs kjeder som prøves i lookahead.',
   restrictions: 'Klassebegrensninger styrer hvilke blokker hvert trinn har lov til å bruke.',
   excludedSubjects: 'Utelukkede fag blir ikke flyttet og teller ikke i balanseringskostnader, men de opptar fortsatt blokker og vises ellers i appen.',
+  excludedStudents: 'Valgte klasser eller elever blir laast og kan ikke flyttes av balanseringen.',
 } as const;
 
 const formatNumber = (value: number): string => {
@@ -60,6 +64,10 @@ const parseSubjects = (value: string | null): string[] => {
     .split(/[,;]/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+};
+
+const inferStudentId = (row: StandardField, index: number): string => {
+  return row.studentId || `${row.navn || 'ukjent'}:${row.klasse || 'ukjent'}:${index}`;
 };
 
 const ALL_BLOCKS: BlockNumber[] = [1, 2, 3, 4];
@@ -128,7 +136,9 @@ export const BalanseringView = ({
   subjectSettingsByName,
   restrictions,
   excludedSubjects,
+  excludedStudentIds,
   onExcludedSubjectsChange,
+  onExcludedStudentIdsChange,
   onRestrictionsChange,
   onApplyResult,
 }: BalanseringViewProps) => {
@@ -142,6 +152,8 @@ export const BalanseringView = ({
   const [presetMode, setPresetMode] = useState<BalancePresetMode>('even');
   const [parametersExpanded, setParametersExpanded] = useState(false);
   const [excludedSubjectsExpanded, setExcludedSubjectsExpanded] = useState(false);
+  const [excludedStudentsExpanded, setExcludedStudentsExpanded] = useState(false);
+  const [expandedClassGroups, setExpandedClassGroups] = useState<Set<string>>(new Set());
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [lastResult, setLastResult] = useState<ProgressiveHybridBalanceResult | null>(null);
@@ -174,6 +186,49 @@ export const BalanseringView = ({
 
     return Array.from(subjects).sort((left, right) => left.localeCompare(right, 'nb', { sensitivity: 'base' }));
   }, [mergedData, subjectSettingsByName]);
+
+  const studentsByClass = useMemo(() => {
+    const byClass = new Map<string, Array<{ studentId: string; name: string }>>();
+
+    mergedData.forEach((row, index) => {
+      if (row.removedFromElevlist) {
+        return;
+      }
+
+      const classGroup = (row.klasse || '').trim().toUpperCase();
+      if (!classGroup) {
+        return;
+      }
+
+      const studentId = inferStudentId(row, index);
+      const name = (row.navn || 'Ukjent').trim() || 'Ukjent';
+      const current = byClass.get(classGroup) || [];
+      current.push({ studentId, name });
+      byClass.set(classGroup, current);
+    });
+
+    return Array.from(byClass.entries())
+      .map(([classGroup, students]) => ({
+        classGroup,
+        students: students.sort((left, right) => left.name.localeCompare(right.name, 'nb', { sensitivity: 'base' })),
+      }))
+      .sort((left, right) => left.classGroup.localeCompare(right.classGroup, 'nb', { sensitivity: 'base' }));
+  }, [mergedData]);
+
+  const lockableStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    studentsByClass.forEach((entry) => {
+      entry.students.forEach((student) => ids.add(student.studentId));
+    });
+    return ids;
+  }, [studentsByClass]);
+
+  useEffect(() => {
+    const normalizedStudentIds = excludedStudentIds.filter((studentId) => lockableStudentIds.has(studentId));
+    if (normalizedStudentIds.length !== excludedStudentIds.length) {
+      onExcludedStudentIdsChange(normalizedStudentIds);
+    }
+  }, [excludedStudentIds, lockableStudentIds, onExcludedStudentIdsChange]);
 
   const hasAnyAllowedRestriction = useMemo(() => {
     return visibleClassLevels.some((classKey) => {
@@ -269,6 +324,33 @@ export const BalanseringView = ({
 
     const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
 
+    const selectedStudentIds = new Set(excludedStudentIds);
+    const lockKeys = new Set<string>();
+
+    mergedData.forEach((row, index) => {
+      if (row.removedFromElevlist) {
+        return;
+      }
+
+      const studentId = inferStudentId(row, index);
+      const isExcludedByStudent = selectedStudentIds.has(studentId);
+      if (!isExcludedByStudent) {
+        return;
+      }
+
+      const subjects = new Set<string>([
+        ...parseSubjects(row.blokk1),
+        ...parseSubjects(row.blokk2),
+        ...parseSubjects(row.blokk3),
+        ...parseSubjects(row.blokk4),
+      ]);
+
+      subjects.forEach((subjectName) => {
+        const subjectCode = mapSubjectToCode(subjectName);
+        lockKeys.add(`${studentId}|${subjectCode}`);
+      });
+    });
+
     const config: Partial<BalancingConfig> = {
       weights: {
         ...weights,
@@ -292,6 +374,7 @@ export const BalanseringView = ({
       maxDepth2Chains: Math.max(0, Math.floor(parseInputNumber(maxDepth2Chains, DEFAULT_BALANCING_CONFIG.maxDepth2Chains))),
       classBlockRestrictions: effectiveRestrictions,
       excludedSubjects,
+      lockedAssignmentKeys: Array.from(lockKeys),
     };
 
     const requestId = activeRequestIdRef.current + 1;
@@ -348,6 +431,48 @@ export const BalanseringView = ({
 
   const clearExcludedSubjects = () => {
     onExcludedSubjectsChange([]);
+  };
+
+  const toggleExcludedClassGroup = (classGroup: string, excluded: boolean) => {
+    const classStudentIds = studentsByClass
+      .find((entry) => entry.classGroup === classGroup)
+      ?.students.map((student) => student.studentId) || [];
+
+    if (excluded) {
+      onExcludedStudentIdsChange(
+        [...excludedStudentIds, ...classStudentIds]
+          .filter((value, index, arr) => arr.indexOf(value) === index)
+      );
+      return;
+    }
+
+    const classStudentIdSet = new Set(classStudentIds);
+    onExcludedStudentIdsChange(excludedStudentIds.filter((value) => !classStudentIdSet.has(value)));
+  };
+
+  const toggleExcludedStudent = (studentId: string, excluded: boolean) => {
+    if (excluded) {
+      onExcludedStudentIdsChange([...excludedStudentIds, studentId].filter((value, index, arr) => arr.indexOf(value) === index));
+      return;
+    }
+
+    onExcludedStudentIdsChange(excludedStudentIds.filter((value) => value !== studentId));
+  };
+
+  const clearExcludedStudents = () => {
+    onExcludedStudentIdsChange([]);
+  };
+
+  const toggleClassExpanded = (classGroup: string) => {
+    setExpandedClassGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(classGroup)) {
+        next.delete(classGroup);
+      } else {
+        next.add(classGroup);
+      }
+      return next;
+    });
   };
 
   const selectPreset = (mode: BalancePresetMode) => {
@@ -660,6 +785,90 @@ export const BalanseringView = ({
                         />
                         <span>{subject}</span>
                       </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {studentsByClass.length > 0 && (
+          <div className={`${styles.constraintsBox} ${!hasAnyAllowedRestriction ? styles.disabledSection : ''}`.trim()}>
+            <button
+              type="button"
+              className={styles.collapsibleHeaderBtn}
+              onClick={() => setExcludedStudentsExpanded((prev) => !prev)}
+              aria-expanded={excludedStudentsExpanded}
+              disabled={!hasAnyAllowedRestriction}
+            >
+              <span className={styles.chevron}>{excludedStudentsExpanded ? '▼' : '▶'}</span>
+              <span>Unnta klasser/elever fra balansering</span>
+            </button>
+
+            {excludedStudentsExpanded && (
+              <>
+                <div className={styles.subjectExclusionHeader}>
+                  <p title={SETTING_DESCRIPTIONS.excludedStudents}>
+                    Valgte klasser/elever blir laast og kan ikke flyttes under balansering.
+                  </p>
+                  <button type="button" className={styles.secondaryBtn} onClick={clearExcludedStudents} disabled={!hasAnyAllowedRestriction}>
+                    Nullstill
+                  </button>
+                </div>
+
+                <div className={styles.classExclusionList}>
+                  {studentsByClass.map((entry) => {
+                    const selectedCount = entry.students.filter((student) => excludedStudentIds.includes(student.studentId)).length;
+                    const classSelected = selectedCount === entry.students.length && entry.students.length > 0;
+                    const classPartiallySelected = selectedCount > 0 && selectedCount < entry.students.length;
+                    const isExpanded = expandedClassGroups.has(entry.classGroup);
+
+                    return (
+                      <div key={entry.classGroup} className={styles.classExclusionItem}>
+                        <div className={styles.classRow}>
+                          <label className={styles.classToggle}>
+                            <input
+                              type="checkbox"
+                              checked={classSelected}
+                              onChange={(event) => toggleExcludedClassGroup(entry.classGroup, event.target.checked)}
+                              disabled={!hasAnyAllowedRestriction}
+                            />
+                            <span className={styles.className}>{entry.classGroup}</span>
+                            <span className={styles.classMeta}>{entry.students.length} elever</span>
+                            {classPartiallySelected && (
+                              <span className={styles.classMeta}>{selectedCount} valgt</span>
+                            )}
+                          </label>
+                          <button
+                            type="button"
+                            className={styles.classExpandBtn}
+                            onClick={() => toggleClassExpanded(entry.classGroup)}
+                            disabled={!hasAnyAllowedRestriction}
+                          >
+                            {isExpanded ? 'Skjul elever' : 'Vis elever'}
+                          </button>
+                        </div>
+
+                        {isExpanded && (
+                          <div className={styles.classStudentList}>
+                            {entry.students.map((student) => {
+                              const checked = excludedStudentIds.includes(student.studentId);
+                              return (
+                                <label key={student.studentId} className={styles.studentToggle}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={!hasAnyAllowedRestriction}
+                                    onChange={(event) => toggleExcludedStudent(student.studentId, event.target.checked)}
+                                  />
+                                  <span>{student.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

@@ -296,6 +296,84 @@
   margin: 0;
 }
 
+.classExclusionList {
+  display: grid;
+  gap: 4px;
+}
+
+.classExclusionItem {
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.classRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.classToggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #2f4258;
+  cursor: pointer;
+}
+
+.classExpandBtn {
+  border: 1px solid #c7d5e6;
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin-right: 6px;
+  background: #eef4fb;
+  color: #244a70;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.classExpandBtn:hover {
+  background: #dde9f6;
+}
+
+.classToggle input {
+  margin: 0;
+}
+
+.className {
+  font-weight: 700;
+  color: #214668;
+}
+
+.classMeta {
+  color: #5d7289;
+}
+
+.classStudentList {
+  border-top: 1px solid #edf2f8;
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  max-height: 190px;
+  overflow: auto;
+}
+
+.studentToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #2f4258;
+}
+
+.studentToggle input {
+  margin: 0;
+}
+
 .weightsGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

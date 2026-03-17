@@ -389,6 +389,32 @@ export const EleverView = ({
     });
   }, [activeFilter, studentQuery, studentSummaries]);
 
+  const visibleStudents = useMemo(() => {
+    if (!selectedStudentId) {
+      return filteredStudents;
+    }
+
+    const alreadyVisible = filteredStudents.some((entry) => entry.studentId === selectedStudentId);
+    if (alreadyVisible) {
+      return filteredStudents;
+    }
+
+    const selectedEntry = studentSummaries.find((entry) => entry.studentId === selectedStudentId);
+    if (!selectedEntry) {
+      return filteredStudents;
+    }
+
+    return [selectedEntry, ...filteredStudents];
+  }, [filteredStudents, selectedStudentId, studentSummaries]);
+
+  const selectedOutsideFilter = useMemo(() => {
+    if (!selectedStudentId) {
+      return false;
+    }
+
+    return !filteredStudents.some((entry) => entry.studentId === selectedStudentId);
+  }, [filteredStudents, selectedStudentId]);
+
   useEffect(() => {
     if (selectedStudentId || hasInitializedSelectionRef.current) {
       return;
@@ -410,22 +436,32 @@ export const EleverView = ({
   }, [activationToken, externallySelectedStudentId, filteredStudents, selectedStudentId]);
 
   useEffect(() => {
-    if (filteredStudents.length === 0) {
+    if (studentSummaries.length === 0) {
       setSelectedStudentId('');
+      return;
+    }
+
+    if (!selectedStudentId) {
+      if (filteredStudents.length > 0) {
+        setSelectedStudentId(filteredStudents[0].studentId);
+      }
+      return;
+    }
+
+    const stillExists = studentSummaries.some((entry) => entry.studentId === selectedStudentId);
+    if (!stillExists) {
+      setSelectedStudentId(filteredStudents[0]?.studentId || '');
       return;
     }
 
     const stillVisible = filteredStudents.some((entry) => entry.studentId === selectedStudentId);
     if (!stillVisible) {
-      if (selectedStudentId) {
-        setStatusMessage('Eleven er ikke lenger i gjeldende filter. Velg en elev fra listen.');
-        window.setTimeout(() => {
-          setStatusMessage('');
-        }, 3000);
-      }
-      setSelectedStudentId('');
+      setStatusMessage('Valgt elev er utenfor aktivt filter, men beholdes valgt.');
+      window.setTimeout(() => {
+        setStatusMessage('');
+      }, 2500);
     }
-  }, [activeFilter, studentQuery, filteredStudents, selectedStudentId]);
+  }, [activeFilter, filteredStudents, selectedStudentId, studentQuery, studentSummaries]);
 
   useEffect(() => {
     setEditAssignment(null);
@@ -1494,7 +1530,7 @@ export const EleverView = ({
           />
 
           <div className={styles.studentList}>
-            {filteredStudents.map((entry) => (
+            {visibleStudents.map((entry) => (
               <button
                 key={entry.studentId}
                 type="button"
@@ -1516,6 +1552,7 @@ export const EleverView = ({
                   {entry.student.klasse || 'Ingen klasse'} | {entry.assignments.length} fag
                   {entry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
                   {entry.removedFromElevlist ? ' | Fjernet fra elevliste' : ''}
+                  {selectedOutsideFilter && entry.studentId === selectedStudentId ? ' | Vises utenfor filter' : ''}
                 </small>
               </button>
             ))}

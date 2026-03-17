@@ -18,6 +18,7 @@ import { ColumnMapper } from './components/ColumnMapper';
 import { MergedDataView } from './components/MergedDataView';
 import { SubjectTally } from './components/SubjectTally';
 import { GrupperView } from './components/GrupperView';
+import { FagoversiktView } from './components/FagoversiktView';
 import { EleverView } from './components/EleverView';
 import { ChangeLogView } from './components/ChangeLogView';
 import { BalanseringView } from './components/BalanseringView';
@@ -47,6 +48,9 @@ interface PersistedAppState {
   blokkCount: number;
   selectedMergedSubject: string;
   classBlockRestrictions?: ClassBlockRestrictions;
+  balancingExcludedSubjects?: string[];
+  balancingExcludedStudentIds?: string[];
+  nextBalancingRoundId?: number;
 }
 
 interface ExportedAppStateFile {
@@ -63,7 +67,7 @@ interface WarningIgnoreEntry {
   ignoredAt: string;
 }
 
-type GroupSubview = 'subjects' | 'groups';
+type GroupSubview = 'subjects' | 'groups' | 'fagoversikt';
 type StudentSubview = 'elever' | 'students';
 
 const clonePersistedState = (state: PersistedAppState): PersistedAppState => {
@@ -84,10 +88,11 @@ function App() {
   const [studentAssignmentChanges, setStudentAssignmentChanges] = useState<StudentAssignmentChange[]>([]);
   const [subjectSettingsByName, setSubjectSettingsByName] = useState<SubjectSettingsByName>({});
   const [blokkCount, setBlokkCount] = useState(4);
+  const [nextBalancingRoundId, setNextBalancingRoundId] = useState(1);
   
   const [columnMapperExpanded, setColumnMapperExpanded] = useState(false);
   const [activeDataTab, setActiveDataTab] = useState<
-    'import' | 'subjects' | 'groups' | 'students' | 'elever' | 'balancing' | 'changelog'
+    'import' | 'subjects' | 'groups' | 'fagoversikt' | 'students' | 'elever' | 'balancing' | 'changelog'
   >('import');
   const [activeGroupTab, setActiveGroupTab] = useState<GroupSubview>('subjects');
   const [activeStudentTab, setActiveStudentTab] = useState<StudentSubview>('elever');
@@ -113,6 +118,7 @@ function App() {
   const [balancingExcludedSubjects, setBalancingExcludedSubjects] = useState<string[]>(
     DEFAULT_BALANCING_CONFIG.excludedSubjects
   );
+  const [balancingExcludedStudentIds, setBalancingExcludedStudentIds] = useState<string[]>([]);
   const [isHydratedFromStorage, setIsHydratedFromStorage] = useState(false);
   const [showReloadConfirmModal, setShowReloadConfirmModal] = useState(false);
   const [isReloadConfirmArmed, setIsReloadConfirmArmed] = useState(false);
@@ -140,6 +146,9 @@ function App() {
     blokkCount,
     selectedMergedSubject,
     classBlockRestrictions,
+    balancingExcludedSubjects,
+    balancingExcludedStudentIds,
+    nextBalancingRoundId,
   });
 
   const pushUndoSnapshot = (snapshot: PersistedAppState) => {
@@ -187,6 +196,11 @@ function App() {
     setStudentAssignmentChanges(
       Array.isArray(parsedState.studentAssignmentChanges) ? parsedState.studentAssignmentChanges : []
     );
+    const maxRoundInChanges = Array.isArray(parsedState.studentAssignmentChanges)
+      ? parsedState.studentAssignmentChanges.reduce((maxRound, change) => {
+        return Math.max(maxRound, typeof change.balancingRoundId === 'number' ? change.balancingRoundId : 0);
+      }, 0)
+      : 0;
 
     if (parsedState.subjectSettingsByName && typeof parsedState.subjectSettingsByName === 'object') {
       setSubjectSettingsByName(parsedState.subjectSettingsByName);
@@ -234,6 +248,21 @@ function App() {
       parsedState.classBlockRestrictions && typeof parsedState.classBlockRestrictions === 'object'
         ? parsedState.classBlockRestrictions
         : DEFAULT_CLASS_BLOCK_RESTRICTIONS
+    );
+    setBalancingExcludedSubjects(
+      Array.isArray(parsedState.balancingExcludedSubjects)
+        ? parsedState.balancingExcludedSubjects
+        : DEFAULT_BALANCING_CONFIG.excludedSubjects
+    );
+    setBalancingExcludedStudentIds(
+      Array.isArray(parsedState.balancingExcludedStudentIds)
+        ? parsedState.balancingExcludedStudentIds
+        : []
+    );
+    setNextBalancingRoundId(
+      typeof parsedState.nextBalancingRoundId === 'number'
+        ? parsedState.nextBalancingRoundId
+        : Math.max(1, maxRoundInChanges + 1)
     );
     setWarningIgnoreDraftByStudentId({});
     setSelectedEleverStudentId('');
@@ -306,7 +335,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (activeDataTab === 'subjects' || activeDataTab === 'groups') {
+    if (activeDataTab === 'subjects' || activeDataTab === 'groups' || activeDataTab === 'fagoversikt') {
       setActiveGroupTab(activeDataTab);
     }
   }, [activeDataTab]);
@@ -404,6 +433,9 @@ function App() {
     blokkCount,
     selectedMergedSubject,
     classBlockRestrictions,
+    balancingExcludedSubjects,
+    balancingExcludedStudentIds,
+    nextBalancingRoundId,
   ]);
 
   useEffect(() => {
@@ -453,6 +485,7 @@ function App() {
     setMergedData(merged);
     setSubjects(tallySubjects(merged));
     setStudentAssignmentChanges([]);
+    setNextBalancingRoundId(1);
     setActiveDataTab('subjects');
     setSubjectSettingsAutoOpenToken((prev) => prev + 1);
   };
@@ -460,6 +493,7 @@ function App() {
   const closeReloadConfirmModal = () => {
     setShowReloadConfirmModal(false);
     setIsReloadConfirmArmed(false);
+    setNextBalancingRoundId(1);
   };
 
   const handleLoadDataClick = () => {
@@ -489,6 +523,8 @@ function App() {
     setSelectedEleverStudentId('');
     setSelectedMergedSubject('');
     setClassBlockRestrictions(DEFAULT_CLASS_BLOCK_RESTRICTIONS);
+    setBalancingExcludedSubjects(DEFAULT_BALANCING_CONFIG.excludedSubjects);
+    setBalancingExcludedStudentIds([]);
     setColumnMapperExpanded(false);
     setActiveDataTab('import');
     setActiveGroupTab('subjects');
@@ -505,6 +541,7 @@ function App() {
     captureUndoSnapshot();
 
     const nowIso = new Date().toISOString();
+    const currentRoundId = nextBalancingRoundId;
     const studentById = new Map<string, StandardField>();
     mergedData.forEach((student, index) => {
       const inferredId = student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
@@ -520,6 +557,7 @@ function App() {
       toBlokk: move.toBlock,
       reason: `Balansering (${move.reason}): ${move.fromGroupCode} -> ${move.toGroupCode}, scoreDelta ${move.scoreDelta.toFixed(2)}`,
       changedAt: nowIso,
+      balancingRoundId: currentRoundId,
     }));
 
     const unresolvedWarningChanges: StudentAssignmentChange[] = result.diagnostics.unresolvedCollisions.map((entry) => {
@@ -537,6 +575,7 @@ function App() {
         toBlokk: 0,
         reason: `ADVARSEL: Kunne ikke plassere elev uten kollisjon for fagkode ${subjectCode}`,
         changedAt: nowIso,
+        balancingRoundId: currentRoundId,
       };
     });
 
@@ -544,6 +583,7 @@ function App() {
     setSubjects(tallySubjects(result.updatedData));
     setSubjectSettingsByName(result.updatedSubjectSettingsByName as SubjectSettingsByName);
     setStudentAssignmentChanges((prev) => [...prev, ...changes, ...unresolvedWarningChanges]);
+    setNextBalancingRoundId((prev) => prev + 1);
   };
 
   const handleApplySubjectBlockMoves = (
@@ -1297,8 +1337,8 @@ function App() {
                       <button
                         type="button"
                         role="tab"
-                        aria-selected={activeDataTab === 'subjects' || activeDataTab === 'groups'}
-                        className={`data-tab ${activeDataTab === 'subjects' || activeDataTab === 'groups' ? 'data-tab-active' : ''}`.trim()}
+                        aria-selected={activeDataTab === 'subjects' || activeDataTab === 'groups' || activeDataTab === 'fagoversikt'}
+                        className={`data-tab ${activeDataTab === 'subjects' || activeDataTab === 'groups' || activeDataTab === 'fagoversikt' ? 'data-tab-active' : ''}`.trim()}
                         onClick={() => setActiveDataTab(activeGroupTab)}
                       >
                         Grupper
@@ -1422,7 +1462,7 @@ function App() {
                   />
                 </div>
               </div>
-              {hasLoadedData && (activeDataTab === 'subjects' || activeDataTab === 'groups') && (
+              {hasLoadedData && (activeDataTab === 'subjects' || activeDataTab === 'groups' || activeDataTab === 'fagoversikt') && (
                   <div className="data-tabs data-subtabs" role="tablist" aria-label="Grupper visning">
                     <button
                       type="button"
@@ -1447,6 +1487,18 @@ function App() {
                       }}
                     >
                       Gruppeoversikt
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDataTab === 'fagoversikt'}
+                      className={`data-tab ${activeDataTab === 'fagoversikt' ? 'data-tab-active' : ''}`.trim()}
+                      onClick={() => {
+                        setActiveGroupTab('fagoversikt');
+                        setActiveDataTab('fagoversikt');
+                      }}
+                    >
+                      Fagoversikt
                     </button>
                   </div>
                 )}
@@ -1564,6 +1616,13 @@ function App() {
                   onStudentDataUpdate={handleStudentAssignmentsUpdated}
                   onOpenStudentCard={handleOpenStudentInElever}
                 />
+              ) : activeDataTab === 'fagoversikt' ? (
+                <FagoversiktView
+                  data={mergedData}
+                  blokkCount={blokkCount}
+                  subjectSettingsByName={subjectSettingsByName}
+                  onOpenStudentCard={handleOpenStudentInElever}
+                />
               ) : activeDataTab === 'changelog' ? (
                 <ChangeLogView
                   changeLog={studentAssignmentChanges}
@@ -1578,7 +1637,9 @@ function App() {
                   subjectSettingsByName={subjectSettingsByName}
                   restrictions={classBlockRestrictions}
                   excludedSubjects={balancingExcludedSubjects}
+                  excludedStudentIds={balancingExcludedStudentIds}
                   onExcludedSubjectsChange={setBalancingExcludedSubjects}
+                  onExcludedStudentIdsChange={setBalancingExcludedStudentIds}
                   onRestrictionsChange={handleClassBlockRestrictionsChange}
                   onApplyResult={handleApplyBalancingResult}
                 />

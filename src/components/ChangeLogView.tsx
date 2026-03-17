@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils';
 import {
   BLOKK_LABELS,
@@ -35,6 +35,11 @@ interface FlattenedStudentStatusEntry extends StudentStatusLogEntry {
   studentId: string;
   navn: string;
   klasse: string;
+}
+
+interface BalancingRoundOption {
+  id: number;
+  timestamp: string;
 }
 
 interface SummaryEntry {
@@ -259,6 +264,62 @@ export const ChangeLogView = ({
   const [warningsExpanded, setWarningsExpanded] = useState(false);
   const [studentStatusExpanded, setStudentStatusExpanded] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRoundId, setSelectedRoundId] = useState<'final' | number>('final');
+
+  const balancingRoundOptions = useMemo(() => {
+    const byRoundId = new Map<number, string>();
+
+    changeLog.forEach((entry) => {
+      if (typeof entry.balancingRoundId !== 'number') {
+        return;
+      }
+
+      const existing = byRoundId.get(entry.balancingRoundId);
+      if (!existing || new Date(entry.changedAt).getTime() > new Date(existing).getTime()) {
+        byRoundId.set(entry.balancingRoundId, entry.changedAt);
+      }
+    });
+
+    return Array.from(byRoundId.entries())
+      .map(([id, timestamp]) => ({ id, timestamp } as BalancingRoundOption))
+      .sort((left, right) => {
+        return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+      });
+  }, [changeLog]);
+
+  useEffect(() => {
+    if (balancingRoundOptions.length === 0) {
+      if (selectedRoundId !== 'final') {
+        setSelectedRoundId('final');
+      }
+      return;
+    }
+
+    if (selectedRoundId === 'final') {
+      return;
+    }
+
+    const stillExists = balancingRoundOptions.some((round) => round.id === selectedRoundId);
+    if (!stillExists) {
+      setSelectedRoundId('final');
+    }
+  }, [balancingRoundOptions, selectedRoundId]);
+
+  const effectiveChangeLog = useMemo(() => {
+    if (selectedRoundId === 'final') {
+      return changeLog;
+    }
+
+    const selectedRound = balancingRoundOptions.find((round) => round.id === selectedRoundId);
+    if (!selectedRound) {
+      return changeLog;
+    }
+
+    const cutoff = new Date(selectedRound.timestamp).getTime();
+    return changeLog.filter((entry) => new Date(entry.changedAt).getTime() <= cutoff);
+  }, [balancingRoundOptions, changeLog, selectedRoundId]);
+
+  const isRoundPreviewMode = selectedRoundId !== 'final';
 
   const studentsById = useMemo(() => {
     const map = new Map<string, StandardField>();
@@ -286,7 +347,7 @@ export const ChangeLogView = ({
   const groupedChanges = useMemo(() => {
     const byStudentId = new Map<string, GroupedStudentChange>();
 
-    changeLog.forEach((entry) => {
+    effectiveChangeLog.forEach((entry) => {
       const existing = byStudentId.get(entry.studentId);
       if (existing) {
         existing.changes.push(entry);
@@ -316,7 +377,7 @@ export const ChangeLogView = ({
 
         return left.klasse.localeCompare(right.klasse, 'nb', { sensitivity: 'base' });
       });
-  }, [changeLog]);
+  }, [effectiveChangeLog]);
 
   const groupedSummaries = useMemo(() => {
     return groupedChanges.map((group) => {
@@ -657,7 +718,7 @@ export const ChangeLogView = ({
   };
 
   const handleExportToWord = () => {
-    if (filteredVisibleGroups.length === 0) {
+    if (filteredVisibleGroups.length === 0 && filteredStudentStatusEntries.length === 0) {
       return;
     }
 
@@ -721,14 +782,14 @@ export const ChangeLogView = ({
     }
   };
 
-  if (groupedChanges.length === 0 && !hasBalancingWarnings) {
+  if (changeLog.length === 0 && !hasBalancingWarnings) {
     return <div className={styles.empty}>Ingen endringer registrert enda.</div>;
   }
 
   return (
     <div className={styles.wrapper}>
       {hasBalancingWarnings && (
-        <section className={styles.warningPanel}>
+        <section className={`${styles.warningPanel} ${isRoundPreviewMode ? styles.previewOutline : ''}`.trim()}>
           <button
             type="button"
             className={styles.warningToggleBtn}
@@ -799,11 +860,38 @@ export const ChangeLogView = ({
             aria-label="Sok i logg"
           />
         </div>
-        <button type="button" className={styles.exportBtn} onClick={handleExportToWord}>
-          Eksporter til Word
-        </button>
+        <div className={styles.topBarActions}>
+          <div className={styles.roundPickerWrap}>
+            <label htmlFor="log-round-select" className={styles.roundPickerLabel}>Balans.runde:</label>
+            <select
+              id="log-round-select"
+              className={styles.roundPickerSelect}
+              value={String(selectedRoundId)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSelectedRoundId(value === 'final' ? 'final' : Number.parseInt(value, 10));
+              }}
+            >
+              <option value="final">Final (siste resultat)</option>
+              {balancingRoundOptions.map((round) => (
+                <option key={`round-${round.id}`} value={String(round.id)}>
+                  Runde {round.id} ({formatTimestamp(round.timestamp)})
+                </option>
+              ))}
+            </select>
+            {isRoundPreviewMode && (
+              <span className={styles.roundWarningIcon} title="Viser ikke siste/finale balanseringsrunde" aria-label="Viser ikke siste/finale balanseringsrunde">
+                ▲
+              </span>
+            )}
+          </div>
+          <button type="button" className={styles.exportBtn} onClick={handleExportToWord}>
+            Eksporter til Word
+          </button>
+        </div>
       </div>
 
+      <div className={isRoundPreviewMode ? styles.previewOutline : ''}>
       {filteredStudentStatusEntries.length > 0 && (
         <section className={styles.statusPanel}>
           <button
@@ -930,6 +1018,7 @@ export const ChangeLogView = ({
           </section>
         ))
       )}
+      </div>
     </div>
   );
 };

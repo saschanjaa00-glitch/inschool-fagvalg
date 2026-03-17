@@ -79,6 +79,54 @@
   flex-wrap: wrap;
 }
 
+.topBarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roundPickerWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.roundPickerLabel {
+  font-size: 11px;
+  color: #4f5d70;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.roundPickerSelect {
+  padding: 5px 8px;
+  border: 1px solid #c8d3e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2f3a49;
+  font-size: 12px;
+}
+
+.roundPickerSelect:focus {
+  outline: none;
+  border-color: #8aa6cf;
+}
+
+.roundWarningIcon {
+  color: #b23939;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.previewOutline {
+  border: 1px solid #d05c5c;
+  border-radius: 8px;
+  padding: 8px;
+}
+
 .statusPanel {
   border: 1px solid #d8e4d7;
   border-radius: 8px;
@@ -290,6 +338,11 @@
 @media (max-width: 900px) {
   .topBarControls {
     width: 100%;
+  }
+
+  .topBarActions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .searchInput {

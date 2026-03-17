@@ -393,6 +393,7 @@ export interface StudentAssignmentChange {
   changedAt: string;
   changeCategory?: 'assignment' | 'student-status';
   studentStatusAction?: 'added' | 'removed' | 'readded';
+  balancingRoundId?: number;
 }
 
 const parseSubjects = (value: string | null): string[] => {

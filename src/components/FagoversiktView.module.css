@@ -1,0 +1,161 @@
+.wrapper {
+  width: 100%;
+}
+
+.empty {
+  padding: 16px;
+  border: 1px solid #dfe7f2;
+  border-radius: 10px;
+  background: #f7faff;
+  color: #49637d;
+}
+
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  color: #1f3040;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: #57708a;
+  font-size: 12px;
+}
+
+.summaryBadge {
+  border: 1px solid #c7d7e8;
+  background: #eef5fc;
+  color: #315a84;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  padding: 8px;
+  border-bottom: 1px solid #dde6ef;
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  color: #51647f;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.subjectRow {
+  cursor: pointer;
+}
+
+.subjectRow:hover {
+  background: #f7fbff;
+}
+
+.subjectRowExpanded {
+  background: #eaf2ff;
+}
+
+.subjectRowOverLimit {
+  background: #fff3f3;
+}
+
+.subjectRowOverLimit:hover {
+  background: #ffe8e8;
+}
+
+.subjectCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #173d63;
+}
+
+.overLimitBadge {
+  border-radius: 999px;
+  background: #f8d9d9;
+  color: #942727;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.limitMeta {
+  color: #57708a;
+}
+
+.detailRow td {
+  padding: 0;
+  background: #fbfdff;
+}
+
+.detailPanel {
+  padding: 12px;
+  border-top: 1px solid #d7e4f0;
+  background: #fbfdff;
+}
+
+.studentTitle {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #1f3347;
+}
+
+.studentList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+
+.studentButton {
+  width: 100%;
+  border: 1px solid #d5e0eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f3347;
+  text-align: left;
+  padding: 8px 9px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.studentButton:hover {
+  border-color: #88abd0;
+  box-shadow: 0 4px 12px rgba(35, 78, 122, 0.08);
+}
+
+.studentName {
+  display: block;
+  font-weight: 600;
+  color: #14293d;
+}
+
+.studentClass {
+  display: block;
+  color: #57708a;
+  font-size: 11px;
+  margin-top: 1px;
+}
