@@ -151,6 +151,24 @@
   background: #ffe6e6;
 }
 
+.studentRowNew {
+  border-color: #9ecfb0;
+  background: #eef9f1;
+}
+
+.studentRowNew:hover {
+  background: #e3f4e8;
+}
+
+.studentRowFourthYear {
+  border-color: #9ec2e3;
+  background: #eef5fd;
+}
+
+.studentRowFourthYear:hover {
+  background: #e3eefb;
+}
+
 .studentName {
   display: block;
   font-size: 13px;
@@ -187,6 +205,20 @@
 .studentHeaderRemoved {
   background: #fff1f1;
   border: 1px solid #e9b3b3;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.studentHeaderNew {
+  background: #eef9f1;
+  border: 1px solid #b9dcc5;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.studentHeaderFourthYear {
+  background: #eef5fd;
+  border: 1px solid #b9d0ea;
   border-radius: 6px;
   padding: 8px;
 }

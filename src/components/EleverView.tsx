@@ -3,7 +3,7 @@ import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils
 import type { SubjectSettingsByName } from './SubjectTally';
 import styles from './EleverView.module.css';
 
-type StudentFilter = 'all' | 'missing' | 'overloaded' | 'collisions' | 'duplicates';
+type StudentFilter = 'all' | 'missing' | 'overloaded' | 'collisions' | 'duplicates' | 'new' | 'removed' | 'fourthYear';
 type WarningType = 'missing' | 'overloaded';
 
 interface WarningIgnoreEntry {
@@ -333,6 +333,9 @@ export const EleverView = ({
       overloaded: studentSummaries.filter((entry) => entry.overloaded && !entry.overloadedIgnored).length,
       collisions: studentSummaries.filter((entry) => entry.collisions).length,
       duplicates: studentSummaries.filter((entry) => entry.duplicates).length,
+      newStudents: studentSummaries.filter((entry) => isManualStudentId(entry.studentId)).length,
+      removedStudents: studentSummaries.filter((entry) => entry.removedFromElevlist).length,
+      fourthYearStudents: studentSummaries.filter((entry) => !!entry.student.fjerdearsElev).length,
     };
   }, [studentSummaries]);
 
@@ -353,6 +356,18 @@ export const EleverView = ({
       }
       if (activeFilter === 'duplicates') {
         return entry.duplicates;
+      }
+
+      if (activeFilter === 'new') {
+        return isManualStudentId(entry.studentId);
+      }
+
+      if (activeFilter === 'removed') {
+        return entry.removedFromElevlist;
+      }
+
+      if (activeFilter === 'fourthYear') {
+        return !!entry.student.fjerdearsElev;
       }
 
       return true;
@@ -1437,6 +1452,30 @@ export const EleverView = ({
           >
             Duplikater ({counts.duplicates})
           </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'new' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('new')}
+            disabled={counts.newStudents === 0}
+          >
+            Nye elever ({counts.newStudents})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'removed' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('removed')}
+            disabled={counts.removedStudents === 0}
+          >
+            Fjernet elever ({counts.removedStudents})
+          </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'fourthYear' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => setActiveFilter('fourthYear')}
+            disabled={counts.fourthYearStudents === 0}
+          >
+            Fjerdeårselever ({counts.fourthYearStudents})
+          </button>
           </div>
           <button type="button" className={styles.addStudentButton} onClick={openAddStudentModal}>
             Legg til elev
@@ -1462,7 +1501,7 @@ export const EleverView = ({
                 ref={(element) => {
                   studentRowRefs.current[entry.studentId] = element;
                 }}
-                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''} ${entry.removedFromElevlist ? styles.studentRowRemoved : ''}`.trim()}
+                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''} ${entry.removedFromElevlist ? styles.studentRowRemoved : ''} ${!entry.removedFromElevlist && isManualStudentId(entry.studentId) ? styles.studentRowNew : ''} ${!entry.removedFromElevlist && !isManualStudentId(entry.studentId) && entry.student.fjerdearsElev ? styles.studentRowFourthYear : ''}`.trim()}
                 onClick={() => setSelectedStudentId(entry.studentId)}
               >
                 <span className={styles.studentName}>
@@ -1488,7 +1527,7 @@ export const EleverView = ({
             <p className={styles.empty}>Ingen elever matcher filteret.</p>
           ) : (
             <>
-              <div className={`${styles.studentHeader} ${selectedStudentEntry.removedFromElevlist ? styles.studentHeaderRemoved : ''}`.trim()}>
+              <div className={`${styles.studentHeader} ${selectedStudentEntry.removedFromElevlist ? styles.studentHeaderRemoved : ''} ${!selectedStudentEntry.removedFromElevlist && isManualStudentId(selectedStudentEntry.studentId) ? styles.studentHeaderNew : ''} ${!selectedStudentEntry.removedFromElevlist && !isManualStudentId(selectedStudentEntry.studentId) && selectedStudentEntry.student.fjerdearsElev ? styles.studentHeaderFourthYear : ''}`.trim()}>
                 <div>
                   <h3>
                     {selectedStudentEntry.student.navn || 'Ukjent elev'}
