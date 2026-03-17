@@ -98,6 +98,25 @@ const getStudentId = (student: StandardField, index: number): string => {
   return student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
 };
 
+const buildAssignmentSnapshot = (student: StandardField): NonNullable<StandardField['removedAssignmentsSnapshot']> => {
+  return {
+    blokkmatvg2: student.blokkmatvg2,
+    matematikk2p: student.matematikk2p,
+    matematikks1: student.matematikks1,
+    matematikkr1: student.matematikkr1,
+    fremmedsprak: student.fremmedsprak,
+    blokk1: student.blokk1,
+    blokk2: student.blokk2,
+    blokk3: student.blokk3,
+    blokk4: student.blokk4,
+    blokk5: student.blokk5,
+    blokk6: student.blokk6,
+    blokk7: student.blokk7,
+    blokk8: student.blokk8,
+    reserve: student.reserve,
+  };
+};
+
 const isManualStudentId = (studentId: string): boolean => {
   return studentId.startsWith('manual:');
 };
@@ -257,6 +276,10 @@ export const EleverView = ({
     const bySubject = new Map<string, Record<number, string[]>>();
 
     data.forEach((student, index) => {
+      if (student.removedFromElevlist) {
+        return;
+      }
+
       const studentId = getStudentId(student, index);
 
       for (let blokkNumber = 1; blokkNumber <= Math.min(blokkCount, 4); blokkNumber += 1) {
@@ -292,6 +315,7 @@ export const EleverView = ({
         student,
         index,
         studentId,
+        removedFromElevlist: !!student.removedFromElevlist,
         assignments,
         missing,
         overloaded,
@@ -313,7 +337,7 @@ export const EleverView = ({
   }, [studentSummaries]);
 
   const filteredStudents = useMemo(() => {
-    return studentSummaries.filter((entry) => {
+    const filtered = studentSummaries.filter((entry) => {
       if (!matchesSearch(entry.student, studentQuery, entry.index)) {
         return false;
       }
@@ -332,6 +356,21 @@ export const EleverView = ({
       }
 
       return true;
+    });
+
+    return filtered.sort((left, right) => {
+      if (left.removedFromElevlist !== right.removedFromElevlist) {
+        return left.removedFromElevlist ? 1 : -1;
+      }
+
+      const leftName = (left.student.navn || '').trim();
+      const rightName = (right.student.navn || '').trim();
+      const nameCompare = leftName.localeCompare(rightName, 'nb', { sensitivity: 'base' });
+      if (nameCompare !== 0) {
+        return nameCompare;
+      }
+
+      return (left.student.klasse || '').localeCompare(right.student.klasse || '', 'nb', { sensitivity: 'base' });
     });
   }, [activeFilter, studentQuery, studentSummaries]);
 
@@ -775,7 +814,7 @@ export const EleverView = ({
   };
 
   const handleRemoveAssignment = (subject: string, blokkNumber: number) => {
-    if (!selectedStudentEntry) {
+    if (!selectedStudentEntry || selectedStudentEntry.removedFromElevlist) {
       return;
     }
 
@@ -811,6 +850,7 @@ export const EleverView = ({
       toBlokk: 0,
       reason: `Elever: fjernet ${subject} fra Blokk ${blokkNumber}`,
       changedAt: new Date().toISOString(),
+      changeCategory: 'assignment',
     };
 
     onStudentDataUpdate(nextData, [change]);
@@ -819,7 +859,7 @@ export const EleverView = ({
   };
 
   const handleAddSubject = () => {
-    if (!selectedStudentEntry) {
+    if (!selectedStudentEntry || selectedStudentEntry.removedFromElevlist) {
       return;
     }
 
@@ -878,6 +918,7 @@ export const EleverView = ({
       toBlokk: blokkNumber,
       reason: `Elever: la til ${normalizedSubject} i Blokk ${blokkNumber}`,
       changedAt: new Date().toISOString(),
+      changeCategory: 'assignment',
     };
 
     onStudentDataUpdate(nextData, [change]);
@@ -889,7 +930,7 @@ export const EleverView = ({
   };
 
   const openAddSubjectModal = () => {
-    if (!selectedStudentEntry) {
+    if (!selectedStudentEntry || selectedStudentEntry.removedFromElevlist) {
       return;
     }
 
@@ -1041,6 +1082,8 @@ export const EleverView = ({
         toBlokk: 0,
         reason: `Elever: la til elev${newStudentIsFourthYear ? ' (Fjerdeårs-elev)' : ''}`,
         changedAt: new Date().toISOString(),
+        changeCategory: 'student-status',
+        studentStatusAction: 'added',
       },
       ...newStudentAssignments.map((assignment) => ({
         studentId: uniqueId,
@@ -1051,6 +1094,7 @@ export const EleverView = ({
         toBlokk: assignment.blokkNumber,
         reason: `Elever: la til ${assignment.subject} i Blokk ${assignment.blokkNumber} for ny elev`,
         changedAt: new Date().toISOString(),
+        changeCategory: 'assignment' as const,
       })),
     ];
 
@@ -1090,6 +1134,7 @@ export const EleverView = ({
         ? 'Elever: markerte elev som Fjerdeårs-elev'
         : 'Elever: fjernet Fjerdeårs-elev-markering',
       changedAt: new Date().toISOString(),
+      changeCategory: 'student-status',
     };
 
     onStudentDataUpdate(nextData, [change]);
@@ -1116,7 +1161,7 @@ export const EleverView = ({
   };
 
   const handleSaveEditAssignment = () => {
-    if (!selectedStudentEntry || !editAssignment) {
+    if (!selectedStudentEntry || selectedStudentEntry.removedFromElevlist || !editAssignment) {
       return;
     }
 
@@ -1195,6 +1240,7 @@ export const EleverView = ({
       toBlokk,
       reason: `Elever: endret ${fromSubject} (Blokk ${fromBlokk}) til ${toSubject} (Blokk ${toBlokk})`,
       changedAt: new Date().toISOString(),
+      changeCategory: 'assignment',
     };
 
     onStudentDataUpdate(nextData, [change]);
@@ -1259,6 +1305,87 @@ export const EleverView = ({
       selectedSubject: value,
       selectedBlokk: String(nextBlokk),
     });
+  };
+
+  const handleToggleRemovedFromElevlist = () => {
+    if (!selectedStudentEntry) {
+      return;
+    }
+
+    const isCurrentlyRemoved = !!selectedStudentEntry.student.removedFromElevlist;
+    const snapshotToRestore = selectedStudentEntry.student.removedAssignmentsSnapshot;
+    const now = new Date().toISOString();
+
+    const nextData = data.map((student, index) => {
+      const currentId = getStudentId(student, index);
+      if (currentId !== selectedStudentEntry.studentId) {
+        return student;
+      }
+
+      if (isCurrentlyRemoved) {
+        return {
+          ...student,
+          removedFromElevlist: false,
+          removedAssignmentsSnapshot: undefined,
+          blokkmatvg2: snapshotToRestore?.blokkmatvg2 ?? student.blokkmatvg2,
+          matematikk2p: snapshotToRestore?.matematikk2p ?? student.matematikk2p,
+          matematikks1: snapshotToRestore?.matematikks1 ?? student.matematikks1,
+          matematikkr1: snapshotToRestore?.matematikkr1 ?? student.matematikkr1,
+          fremmedsprak: snapshotToRestore?.fremmedsprak ?? student.fremmedsprak,
+          blokk1: snapshotToRestore?.blokk1 ?? student.blokk1,
+          blokk2: snapshotToRestore?.blokk2 ?? student.blokk2,
+          blokk3: snapshotToRestore?.blokk3 ?? student.blokk3,
+          blokk4: snapshotToRestore?.blokk4 ?? student.blokk4,
+          blokk5: snapshotToRestore?.blokk5 ?? student.blokk5,
+          blokk6: snapshotToRestore?.blokk6 ?? student.blokk6,
+          blokk7: snapshotToRestore?.blokk7 ?? student.blokk7,
+          blokk8: snapshotToRestore?.blokk8 ?? student.blokk8,
+          reserve: snapshotToRestore?.reserve ?? student.reserve,
+        };
+      }
+
+      return {
+        ...student,
+        removedFromElevlist: true,
+        removedAssignmentsSnapshot: buildAssignmentSnapshot(student),
+        blokkmatvg2: null,
+        matematikk2p: null,
+        matematikks1: null,
+        matematikkr1: null,
+        fremmedsprak: null,
+        blokk1: null,
+        blokk2: null,
+        blokk3: null,
+        blokk4: null,
+        blokk5: null,
+        blokk6: null,
+        blokk7: null,
+        blokk8: null,
+        reserve: null,
+      };
+    });
+
+    const change: StudentAssignmentChange = {
+      studentId: selectedStudentEntry.studentId,
+      navn: selectedStudentEntry.student.navn || 'Ukjent',
+      klasse: selectedStudentEntry.student.klasse || 'Ingen klasse',
+      subject: '',
+      fromBlokk: 0,
+      toBlokk: 0,
+      reason: isCurrentlyRemoved
+        ? 'Elever: gjenla til elev i elevlisten'
+        : 'Elever: fjernet elev fra elevlisten',
+      changedAt: now,
+      changeCategory: 'student-status',
+      studentStatusAction: isCurrentlyRemoved ? 'readded' : 'removed',
+    };
+
+    onStudentDataUpdate(nextData, [change]);
+    applyStatusMessage(
+      isCurrentlyRemoved
+        ? 'Elev lagt tilbake i elevlisten og fagvalg gjenopprettet'
+        : 'Elev fjernet fra elevlisten (fagvalg deaktivert)'
+    );
   };
 
   if (data.length === 0) {
@@ -1335,7 +1462,7 @@ export const EleverView = ({
                 ref={(element) => {
                   studentRowRefs.current[entry.studentId] = element;
                 }}
-                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''}`.trim()}
+                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''} ${entry.removedFromElevlist ? styles.studentRowRemoved : ''}`.trim()}
                 onClick={() => setSelectedStudentId(entry.studentId)}
               >
                 <span className={styles.studentName}>
@@ -1349,6 +1476,7 @@ export const EleverView = ({
                 <small className={styles.studentMeta}>
                   {entry.student.klasse || 'Ingen klasse'} | {entry.assignments.length} fag
                   {entry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
+                  {entry.removedFromElevlist ? ' | Fjernet fra elevliste' : ''}
                 </small>
               </button>
             ))}
@@ -1360,7 +1488,7 @@ export const EleverView = ({
             <p className={styles.empty}>Ingen elever matcher filteret.</p>
           ) : (
             <>
-              <div className={styles.studentHeader}>
+              <div className={`${styles.studentHeader} ${selectedStudentEntry.removedFromElevlist ? styles.studentHeaderRemoved : ''}`.trim()}>
                 <div>
                   <h3>
                     {selectedStudentEntry.student.navn || 'Ukjent elev'}
@@ -1373,18 +1501,34 @@ export const EleverView = ({
                   <p>
                     {selectedStudentEntry.student.klasse || 'Ingen klasse'}
                     {selectedStudentEntry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
+                    {selectedStudentEntry.removedFromElevlist ? ' | Fjernet fra elevliste' : ''}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className={`${styles.fourthYearToggleButton} ${selectedStudentEntry.student.fjerdearsElev ? styles.fourthYearToggleButtonActive : ''}`.trim()}
-                  onClick={handleToggleFourthYearStatus}
-                >
-                  {selectedStudentEntry.student.fjerdearsElev
-                    ? 'Fjern Fjerdeårs-elev status'
-                    : 'Sett som Fjerdeårs-elev - ignorer trinnrestriksjoner i balansering'}
-                </button>
+                <div className={styles.studentHeaderActions}>
+                  <button
+                    type="button"
+                    className={`${styles.removeFromListButton} ${selectedStudentEntry.removedFromElevlist ? styles.readdToListButton : ''}`.trim()}
+                    onClick={handleToggleRemovedFromElevlist}
+                  >
+                    {selectedStudentEntry.removedFromElevlist ? 'Legg tilbake i elevliste' : 'Fjern fra elevliste'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.fourthYearToggleButton} ${selectedStudentEntry.student.fjerdearsElev ? styles.fourthYearToggleButtonActive : ''}`.trim()}
+                    onClick={handleToggleFourthYearStatus}
+                  >
+                    {selectedStudentEntry.student.fjerdearsElev
+                      ? 'Fjern Fjerdeårs-elev status'
+                      : 'Sett som Fjerdeårs-elev - ignorer trinnrestriksjoner i balansering'}
+                  </button>
+                </div>
               </div>
+
+              {selectedStudentEntry.removedFromElevlist && (
+                <p className={styles.removedInfoMessage}>
+                  Eleven er fjernet fra elevlisten. Fagvalg er midlertidig deaktivert og teller ikke i grupper.
+                </p>
+              )}
 
               {selectedWarningRows.length > 0 && (
                 <div className={styles.warningIgnorePanel}>
@@ -1475,6 +1619,7 @@ export const EleverView = ({
                                 className={styles.moveButton}
                                 onClick={() => openEditAssignment(assignment, rowKey)}
                                 title={`Endre ${assignment.subject}`}
+                                disabled={selectedStudentEntry.removedFromElevlist}
                               >
                                 Endre
                               </button>
@@ -1482,6 +1627,7 @@ export const EleverView = ({
                                 type="button"
                                 className={styles.removeButton}
                                 onClick={() => handleRemoveAssignment(assignment.subject, assignment.blokkNumber)}
+                                disabled={selectedStudentEntry.removedFromElevlist}
                               >
                                 Fjern
                               </button>
@@ -1494,7 +1640,12 @@ export const EleverView = ({
               </table>
 
               <div className={styles.addBar}>
-                <button type="button" className={styles.addButton} onClick={openAddSubjectModal}>
+                <button
+                  type="button"
+                  className={styles.addButton}
+                  onClick={openAddSubjectModal}
+                  disabled={selectedStudentEntry.removedFromElevlist}
+                >
                   Legg til fag
                 </button>
               </div>

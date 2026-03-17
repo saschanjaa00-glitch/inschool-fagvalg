@@ -142,6 +142,15 @@
   background: #eaf4ff;
 }
 
+.studentRowRemoved {
+  border-color: #d79a9a;
+  background: #fff1f1;
+}
+
+.studentRowRemoved:hover {
+  background: #ffe6e6;
+}
+
 .studentName {
   display: block;
   font-size: 13px;
@@ -175,6 +184,21 @@
   gap: 10px;
 }
 
+.studentHeaderRemoved {
+  background: #fff1f1;
+  border: 1px solid #e9b3b3;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.studentHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .studentHeader p {
   margin: 3px 0 8px;
   color: #666;
@@ -201,6 +225,41 @@
   border-color: #2f8b57;
   background: #e8f8ee;
   color: #1f663f;
+}
+
+.removeFromListButton {
+  padding: 5px 8px;
+  border: 1px solid #bf6666;
+  background: #d97a7a;
+  color: #ffffff;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.removeFromListButton:hover {
+  background: #c86c6c;
+}
+
+.readdToListButton {
+  border-color: #2f8b57;
+  background: #4ba370;
+}
+
+.readdToListButton:hover {
+  background: #438f63;
+}
+
+.removedInfoMessage {
+  margin: 8px 0;
+  background: #fff1f1;
+  border: 1px solid #e1b0b0;
+  color: #7a2c2c;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .warningIgnorePanel {
@@ -391,6 +450,13 @@
 
 .removeButton:hover {
   background: #c86c6c;
+}
+
+.removeButton:disabled,
+.moveButton:disabled,
+.addButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .actionsCell {

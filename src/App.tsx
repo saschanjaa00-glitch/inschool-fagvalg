@@ -774,7 +774,10 @@ function App() {
   };
 
   const warningEntries = useMemo(() => {
-    return mergedData.map((student, index) => {
+    return mergedData
+      .map((student, index) => ({ student, index }))
+      .filter(({ student }) => !student.removedFromElevlist)
+      .map(({ student, index }) => {
       const subjectCount = getWarningSubjects(student).length;
       const collisionBlokker = [1, 2, 3, 4].filter((blokkNumber) => getWarningSubjectsInBlokk(student, blokkNumber).length > 1);
 

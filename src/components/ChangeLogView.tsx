@@ -25,6 +25,18 @@ interface GroupedStudentChange {
   changes: StudentAssignmentChange[];
 }
 
+interface StudentStatusLogEntry {
+  action: 'added' | 'removed' | 'readded';
+  changedAt: string;
+  reason: string;
+}
+
+interface FlattenedStudentStatusEntry extends StudentStatusLogEntry {
+  studentId: string;
+  navn: string;
+  klasse: string;
+}
+
 interface SummaryEntry {
   subject: string;
   fromBlokk: number;
@@ -192,6 +204,50 @@ const getWordLineStyle = (changeType: ChangeType): string => {
   return 'background:#eef5ff;border-left:3px solid #2a63b7;color:#1f3f6c;';
 };
 
+const isStudentStatusChange = (change: StudentAssignmentChange): boolean => {
+  if (change.changeCategory === 'student-status') {
+    return true;
+  }
+
+  if (change.studentStatusAction) {
+    return true;
+  }
+
+  const reasonLower = (change.reason || '').toLocaleLowerCase('nb');
+  return reasonLower.includes('la til elev')
+    || reasonLower.includes('fjernet elev fra elevlisten')
+    || reasonLower.includes('gjenla til elev i elevlisten');
+};
+
+const resolveStatusAction = (change: StudentAssignmentChange): StudentStatusLogEntry['action'] | null => {
+  if (change.studentStatusAction) {
+    return change.studentStatusAction;
+  }
+
+  const reasonLower = (change.reason || '').toLocaleLowerCase('nb');
+  if (reasonLower.includes('gjenla til elev i elevlisten')) {
+    return 'readded';
+  }
+  if (reasonLower.includes('fjernet elev fra elevlisten')) {
+    return 'removed';
+  }
+  if (reasonLower.includes('la til elev')) {
+    return 'added';
+  }
+
+  return null;
+};
+
+const formatStudentStatusLabel = (entry: StudentStatusLogEntry): string => {
+  if (entry.action === 'added') {
+    return 'Elev lagt til';
+  }
+  if (entry.action === 'removed') {
+    return 'Elev fjernet fra elevliste';
+  }
+  return 'Elev lagt tilbake i elevliste';
+};
+
 export const ChangeLogView = ({
   changeLog,
   currentStudents,
@@ -201,6 +257,7 @@ export const ChangeLogView = ({
 }: ChangeLogViewProps) => {
   const [mode, setMode] = useState<LogMode>('summary');
   const [warningsExpanded, setWarningsExpanded] = useState(false);
+  const [studentStatusExpanded, setStudentStatusExpanded] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   const studentsById = useMemo(() => {
@@ -267,9 +324,56 @@ export const ChangeLogView = ({
         return new Date(left.changedAt).getTime() - new Date(right.changedAt).getTime();
       });
 
+      const assignmentChanges = oldestFirst.filter((entry) => !isStudentStatusChange(entry));
+      const studentStatusDetailed = oldestFirst
+        .filter((entry) => isStudentStatusChange(entry))
+        .map((entry) => {
+          const action = resolveStatusAction(entry);
+          if (!action) {
+            return null;
+          }
+
+          return {
+            action,
+            changedAt: entry.changedAt,
+            reason: entry.reason,
+          } as StudentStatusLogEntry;
+        })
+        .filter((entry): entry is StudentStatusLogEntry => entry !== null);
+
+      const summaryStatusEntries = (() => {
+        const summaryEntriesRaw: Array<StudentStatusLogEntry | null> = [];
+        const openRemovedIndexes: number[] = [];
+
+        studentStatusDetailed.forEach((entry) => {
+          if (entry.action === 'removed') {
+            summaryEntriesRaw.push(entry);
+            openRemovedIndexes.push(summaryEntriesRaw.length - 1);
+            return;
+          }
+
+          if (entry.action === 'readded') {
+            if (openRemovedIndexes.length > 0) {
+              const cancelledIndex = openRemovedIndexes.pop();
+              if (typeof cancelledIndex === 'number') {
+                summaryEntriesRaw[cancelledIndex] = null;
+              }
+              return;
+            }
+
+            summaryEntriesRaw.push(entry);
+            return;
+          }
+
+          summaryEntriesRaw.push(entry);
+        });
+
+        return summaryEntriesRaw.filter((entry): entry is StudentStatusLogEntry => entry !== null);
+      })();
+
       const bySubject = new Map<string, SummaryEntry>();
 
-      oldestFirst.forEach((entry) => {
+      assignmentChanges.forEach((entry) => {
         const key = entry.subject.trim().toLocaleLowerCase('nb');
         if (!key) {
           return;
@@ -297,28 +401,33 @@ export const ChangeLogView = ({
       return {
         ...group,
         summaryEntries,
+        detailedStatusEntries: studentStatusDetailed,
+        summaryStatusEntries,
+        detailedAssignmentChanges: [...assignmentChanges].sort((left, right) => {
+          return new Date(right.changedAt).getTime() - new Date(left.changedAt).getTime();
+        }),
       };
     });
   }, [groupedChanges]);
 
-  const visibleGroups = useMemo(() => {
+  const visibleChangeGroups = useMemo(() => {
     if (mode === 'summary') {
       return groupedSummaries.filter((group) => group.summaryEntries.length > 0);
     }
 
-    return groupedSummaries;
+    return groupedSummaries.filter((group) => group.detailedAssignmentChanges.length > 0);
   }, [groupedSummaries, mode]);
 
   const filteredVisibleGroups = useMemo(() => {
     const tokens = parseSearchTokens(searchQuery);
     if (tokens.length === 0) {
-      return visibleGroups;
+      return visibleChangeGroups;
     }
 
-    return visibleGroups.filter((group) => {
+    return visibleChangeGroups.filter((group) => {
       const searchableName = `${group.navn} ${group.klasse}`.toLocaleLowerCase('nb');
       const subjectSet = new Set<string>([
-        ...group.changes.map((entry) => entry.subject),
+        ...group.detailedAssignmentChanges.map((entry) => entry.subject),
         ...group.summaryEntries.map((entry) => entry.subject),
       ]);
       const searchableSubjects = Array.from(subjectSet)
@@ -329,7 +438,34 @@ export const ChangeLogView = ({
         return searchableName.includes(token) || searchableSubjects.includes(token);
       });
     });
-  }, [searchQuery, visibleGroups]);
+  }, [searchQuery, visibleChangeGroups]);
+
+  const filteredStudentStatusEntries = useMemo(() => {
+    const tokens = parseSearchTokens(searchQuery);
+    const visibleStatusGroups = groupedSummaries.filter((group) => {
+      const entries = mode === 'detailed' ? group.detailedStatusEntries : group.summaryStatusEntries;
+      if (entries.length === 0) {
+        return false;
+      }
+
+      if (tokens.length === 0) {
+        return true;
+      }
+
+      const searchableName = `${group.navn} ${group.klasse}`.toLocaleLowerCase('nb');
+      return tokens.every((token) => searchableName.includes(token));
+    });
+
+    return visibleStatusGroups.flatMap((group) => {
+      const entries = mode === 'detailed' ? group.detailedStatusEntries : group.summaryStatusEntries;
+      return entries.map((entry) => ({
+        ...entry,
+        studentId: group.studentId,
+        navn: group.navn,
+        klasse: group.klasse,
+      } as FlattenedStudentStatusEntry));
+    });
+  }, [groupedSummaries, mode, searchQuery]);
 
   const excludedSubjectsSet = useMemo(() => {
     return new Set(
@@ -534,7 +670,7 @@ export const ChangeLogView = ({
         const finalSelection = formatFinalAllocation(currentStudent);
 
         const changeLines = mode === 'detailed'
-          ? group.changes
+          ? group.detailedAssignmentChanges
             .map((entry) => {
               const changeType = getChangeType(entry.fromBlokk, entry.toBlokk);
               return `<tr><td style="${getWordLineStyle(changeType)}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.subject)}</strong>: ${escapeHtml(entry.reason)}</td><td style="${getWordLineStyle(changeType)}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
@@ -550,8 +686,24 @@ export const ChangeLogView = ({
         return `<section class="student"><h3>${escapeHtml(group.navn)} (${escapeHtml(group.klasse)})</h3><p class="student-meta">${escapeHtml(finalSelection || 'Ingen aktive fagvalg registrert')}</p><div class="student-change-block"><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${changeLines}</table></div><div class="student-spacer">&nbsp;</div></section>`;
       }).join('');
 
+      const statusRows = filteredStudentStatusEntries
+        .map((entry) => {
+          const style = entry.action === 'removed'
+            ? getWordLineStyle('removed')
+            : entry.action === 'added'
+              ? getWordLineStyle('added')
+              : getWordLineStyle('moved');
+
+          return `<tr><td style="${style}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.navn)} (${escapeHtml(entry.klasse)})</strong>: ${escapeHtml(formatStudentStatusLabel(entry))}</td><td style="${style}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
+        })
+        .join('');
+
+      const statusSection = statusRows.length > 0
+        ? `<section><h2>Elever lagt til / fjernet</h2><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${statusRows}</table></section>`
+        : '';
+
       const title = mode === 'detailed' ? 'Logg (detaljert)' : 'Logg (oppsummert)';
-      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p><section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
+      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p>${statusSection}<section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
 
       const blob = new Blob(['\ufeff', htmlDocument], { type: 'application/msword;charset=utf-8' });
       const filename = `logg-${mode}-${formatDateForFilename(generatedAt)}.doc`;
@@ -652,8 +804,65 @@ export const ChangeLogView = ({
         </button>
       </div>
 
+      {filteredStudentStatusEntries.length > 0 && (
+        <section className={styles.statusPanel}>
+          <button
+            type="button"
+            className={styles.statusToggleButton}
+            onClick={() => setStudentStatusExpanded((prev) => !prev)}
+            aria-expanded={studentStatusExpanded}
+          >
+            <span>{studentStatusExpanded ? '▼' : '▶'}</span>
+            <span className={styles.statusPanelTitle}>
+              Elever lagt til / fjernet ({filteredStudentStatusEntries.length})
+            </span>
+          </button>
+
+          {studentStatusExpanded && (
+            <ul className={styles.statusList}>
+              {filteredStudentStatusEntries.map((entry, index) => {
+                const itemClass = entry.action === 'removed'
+                  ? styles.changeItemRemoved
+                  : entry.action === 'added'
+                    ? styles.changeItemAdded
+                    : styles.changeItemMoved;
+
+                return (
+                  <li
+                    key={`${entry.studentId}-status-${entry.changedAt}-${index}`}
+                    className={`${styles.changeItem} ${itemClass}`.trim()}
+                    title={entry.reason}
+                  >
+                    <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                    <span>
+                      {onOpenStudentCard ? (
+                        <button
+                          type="button"
+                          className={styles.studentHeaderBtn}
+                          onClick={() => onOpenStudentCard(entry.studentId)}
+                        >
+                          <strong>{entry.navn} ({entry.klasse})</strong>
+                        </button>
+                      ) : (
+                        <strong>{entry.navn} ({entry.klasse})</strong>
+                      )}
+                      {': '}
+                      {formatStudentStatusLabel(entry)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
       {filteredVisibleGroups.length === 0 ? (
-        <div className={styles.empty}>Ingen elever matcher søket.</div>
+        <div className={styles.empty}>
+          {filteredStudentStatusEntries.length > 0
+            ? 'Ingen fagendringer matcher søket.'
+            : 'Ingen elever matcher søket.'}
+        </div>
       ) : (
         filteredVisibleGroups.map((group) => (
           <section key={group.studentId} className={styles.studentBlock}>
@@ -670,7 +879,7 @@ export const ChangeLogView = ({
                       +
                     </span>
                   ) : null}
-                  {' '}({group.klasse}) - {mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer
+                  {' '}({group.klasse}) - {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
                 </button>
               ) : (
                 <>
@@ -680,10 +889,11 @@ export const ChangeLogView = ({
                       +
                     </span>
                   ) : null}
-                  {' '}({group.klasse}) - {mode === 'detailed' ? group.changes.length : group.summaryEntries.length} endringer
+                  {' '}({group.klasse}) - {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
                 </>
               )}
             </h4>
+
             {mode === 'summary' && (
               <p className={styles.studentAllocation}>
                 {finalAllocationByStudentId.get(group.studentId) || 'Ingen aktive fagvalg registrert'}
@@ -691,7 +901,7 @@ export const ChangeLogView = ({
             )}
             <ul className={styles.changeList}>
               {mode === 'detailed'
-                ? group.changes.map((entry, index) => {
+                ? group.detailedAssignmentChanges.map((entry, index) => {
                   return (
                     <li
                       key={`${group.studentId}-${entry.changedAt}-${index}`}

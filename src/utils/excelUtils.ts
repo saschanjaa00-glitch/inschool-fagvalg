@@ -160,6 +160,23 @@ const isMathR1Header = (header: string): boolean => {
 export interface StandardField {
   studentId?: string;
   fjerdearsElev?: boolean;
+  removedFromElevlist?: boolean;
+  removedAssignmentsSnapshot?: {
+    blokkmatvg2: string | null;
+    matematikk2p: string | null;
+    matematikks1: string | null;
+    matematikkr1: string | null;
+    fremmedsprak: string | null;
+    blokk1: string | null;
+    blokk2: string | null;
+    blokk3: string | null;
+    blokk4: string | null;
+    blokk5: string | null;
+    blokk6: string | null;
+    blokk7: string | null;
+    blokk8: string | null;
+    reserve: string | null;
+  };
   navn: string | null;
   klasse: string | null;
   blokkmatvg2: string | null;
@@ -328,11 +345,21 @@ export const mergeFiles = (
           return;
         }
 
-        if (standardField === 'studentId' || standardField === 'fjerdearsElev') {
+        if (
+          standardField === 'studentId'
+          || standardField === 'fjerdearsElev'
+          || standardField === 'removedFromElevlist'
+          || standardField === 'removedAssignmentsSnapshot'
+        ) {
           return;
         }
 
-        standardRow[standardField as Exclude<keyof StandardField, 'studentId' | 'fjerdearsElev'>] = value;
+        standardRow[
+          standardField as Exclude<
+            keyof StandardField,
+            'studentId' | 'fjerdearsElev' | 'removedFromElevlist' | 'removedAssignmentsSnapshot'
+          >
+        ] = value;
       });
       
       // Progress class to next year
@@ -364,6 +391,8 @@ export interface StudentAssignmentChange {
   toBlokk: number;
   reason: string;
   changedAt: string;
+  changeCategory?: 'assignment' | 'student-status';
+  studentStatusAction?: 'added' | 'removed' | 'readded';
 }
 
 const parseSubjects = (value: string | null): string[] => {
