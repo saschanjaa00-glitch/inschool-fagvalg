@@ -70,6 +70,23 @@
   outline: none;
 }
 
+.mathToggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mathPlaceholderCell {
+  color: #8aa;
+  text-align: center;
+  font-style: italic;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -335,6 +352,11 @@
 .groupCardActive {
   background: #eef8ee;
   border-color: #8ec58e;
+}
+
+.groupCardAtMax {
+  background: #cfe8cf;
+  border-color: #67a567;
 }
 
 .groupCardInactive {

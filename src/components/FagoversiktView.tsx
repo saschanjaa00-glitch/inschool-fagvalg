@@ -59,6 +59,29 @@ const getBlokkKey = (blokkNumber: number): BlokkField => {
   return `blokk${blokkNumber}` as BlokkField;
 };
 
+const MATH_OPTIONS: Array<{ key: '2P' | 'S1' | 'R1'; display: string }> = [
+  { key: 'R1', display: 'Matematikk R1' },
+  { key: 'S1', display: 'Matematikk S1' },
+  { key: '2P', display: 'Matematikk 2P' },
+];
+
+const extractMathOptions = (value: string | null): Set<'2P' | 'S1' | 'R1'> => {
+  const result = new Set<'2P' | 'S1' | 'R1'>();
+  if (!value) {
+    return result;
+  }
+  value
+    .split(/[,;/]/)
+    .map((part) => part.trim().toUpperCase().replace(/\s+/g, ''))
+    .filter((part) => part.length > 0)
+    .forEach((part) => {
+      if (part.includes('2P')) result.add('2P');
+      if (part.includes('S1')) result.add('S1');
+      if (part.includes('R1')) result.add('R1');
+    });
+  return result;
+};
+
 export const FagoversiktView = ({
   data,
   blokkCount,
@@ -66,6 +89,7 @@ export const FagoversiktView = ({
   onOpenStudentCard,
 }: FagoversiktViewProps) => {
   const [expandedSubjectKey, setExpandedSubjectKey] = useState<string | null>(null);
+  const [showMath, setShowMath] = useState(false);
 
   const visibleBlokkCount = Math.min(blokkCount, 8);
 
@@ -111,6 +135,7 @@ export const FagoversiktView = ({
 
     return Array.from(subjects.entries())
       .map(([subjectKey, value]) => {
+
         const breakdown: Record<BlokkLabel, number> = {
           'Blokk 1': 0,
           'Blokk 2': 0,
@@ -152,6 +177,47 @@ export const FagoversiktView = ({
       .sort((left, right) => compareText(left.subject, right.subject));
   }, [data, subjectSettingsByName, visibleBlokkCount]);
 
+  const mathRows = useMemo((): SubjectOverviewRow[] => {
+    return MATH_OPTIONS
+      .map(({ key, display }) => {
+        const studentsById = new Map<string, SubjectStudentRow>();
+        data.forEach((student, index) => {
+          const options = extractMathOptions(student.blokkmatvg2);
+          if (!options.has(key)) {
+            return;
+          }
+          const studentId = getStudentId(student, index);
+          studentsById.set(studentId, {
+            studentId,
+            navn: student.navn || 'Ukjent',
+            klasse: student.klasse || 'Ingen klasse',
+          });
+        });
+        const students = Array.from(studentsById.values()).sort((a, b) => {
+          const byName = compareText(a.navn, b.navn);
+          return byName !== 0 ? byName : compareText(a.klasse, b.klasse);
+        });
+        return {
+          subjectKey: normalizeSubjectKey(display),
+          subject: display,
+          blokkNumbers: [],
+          students,
+          totalMax: null,
+          overTotalLimit: false,
+        } as SubjectOverviewRow;
+      })
+      .filter((row) => row.students.length > 0);
+  }, [data]);
+
+  const displayRows = useMemo(() => {
+    if (!showMath) {
+      return rows;
+    }
+    const combined = [...rows, ...mathRows];
+    combined.sort((a, b) => compareText(a.subject, b.subject));
+    return combined;
+  }, [rows, mathRows, showMath]);
+
   if (rows.length === 0) {
     return <div className={styles.empty}>Ingen fag tilgjengelig.</div>;
   }
@@ -162,8 +228,16 @@ export const FagoversiktView = ({
         <div>
           <h3 className={styles.title}>Fagoversikt</h3>
           <p className={styles.subtitle}>Fag sortert alfabetisk med blokker og elevliste per fag.</p>
+          <label className={styles.mathToggle}>
+            <input
+              type="checkbox"
+              checked={showMath}
+              onChange={(e) => setShowMath(e.target.checked)}
+            />
+            Vis matematikk
+          </label>
         </div>
-        <div className={styles.summaryBadge}>{rows.length} fag</div>
+        <div className={styles.summaryBadge}>{displayRows.length} fag</div>
       </div>
 
       <table className={styles.table}>
@@ -175,7 +249,7 @@ export const FagoversiktView = ({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {displayRows.map((row) => {
             const isExpanded = expandedSubjectKey === row.subjectKey;
 
             return (

@@ -60,6 +60,16 @@ interface SubjectDraft {
   groupMaxBySlotKey: Record<string, string>;
 }
 
+const getDraftGroupMaxValue = (draft: SubjectDraft, slot: SubjectGroupSlot): string => {
+  return draft.groupMaxBySlotKey[slot.slotKey] ?? draft.defaultMax;
+};
+
+const hasDraftGroupOverride = (draft: SubjectDraft, slot: SubjectGroupSlot): boolean => {
+  return Object.prototype.hasOwnProperty.call(draft.groupMaxBySlotKey, slot.slotKey)
+    && sanitizeCount(draft.groupMaxBySlotKey[slot.slotKey], sanitizeCount(draft.defaultMax, slot.max))
+      !== sanitizeCount(draft.defaultMax, slot.max);
+};
+
 interface DeleteGroupConfirmState {
   subject: string;
   groupId: string;
@@ -134,6 +144,29 @@ const getStudentId = (student: StandardField, index: number): string => {
   return student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`;
 };
 
+const MATH_OPTION_KEYS = ['R1', 'S1', '2P'] as const;
+type MathOptionKey = (typeof MATH_OPTION_KEYS)[number];
+const MATH_OPTION_DISPLAY: Record<MathOptionKey, string> = {
+  R1: 'Matematikk R1',
+  S1: 'Matematikk S1',
+  '2P': 'Matematikk 2P',
+};
+
+const parseMathOptionsFromBlokkMat = (value: string | null): Set<MathOptionKey> => {
+  const result = new Set<MathOptionKey>();
+  if (!value) return result;
+  value
+    .split(/[,;/]/)
+    .map((part) => part.trim().toUpperCase().replace(/\s+/g, ''))
+    .filter((part) => part.length > 0)
+    .forEach((part) => {
+      if (part.includes('2P')) result.add('2P');
+      if (part.includes('S1')) result.add('S1');
+      if (part.includes('R1')) result.add('R1');
+    });
+  return result;
+};
+
 export const SubjectTally = ({
   subjects,
   mergedData,
@@ -157,6 +190,7 @@ export const SubjectTally = ({
   const [isDeleteGroupConfirmArmed, setIsDeleteGroupConfirmArmed] = useState(false);
   const [expandedMathOption, setExpandedMathOption] = useState<string | null>(null);
   const [expandedForeignOption, setExpandedForeignOption] = useState<string | null>(null);
+  const [showMath, setShowMath] = useState(false);
 
   const subjectStatsByKey = useMemo(() => {
     const stats = new Map<
@@ -213,10 +247,20 @@ export const SubjectTally = ({
           subjectStats.idsByBlokk[label].push(studentId);
         });
       });
+
+      if (showMath) {
+        const mathOptions = parseMathOptionsFromBlokkMat(student.blokkmatvg2);
+        mathOptions.forEach((key) => {
+          const displayName = MATH_OPTION_DISPLAY[key];
+          const mathStats = ensureStats(displayName);
+          mathStats.breakdown['Blokk 1'] += 1;
+          mathStats.idsByBlokk['Blokk 1'].push(studentId);
+        });
+      }
     });
 
     return stats;
-  }, [mergedData, subjectSettingsByName, subjects]);
+  }, [mergedData, subjectSettingsByName, subjects, showMath]);
 
   const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
     const entry = subjectStatsByKey.get(normalizeSubjectKey(subject));
@@ -745,29 +789,7 @@ export const SubjectTally = ({
   };
 
   const extractMathOptionsFromBlokkMat = (value: string | null): Set<'2P' | 'S1' | 'R1'> => {
-    const selected = new Set<'2P' | 'S1' | 'R1'>();
-
-    if (!value) {
-      return selected;
-    }
-
-    value
-      .split(/[,;/]/)
-      .map((part) => part.trim().toUpperCase().replace(/\s+/g, ''))
-      .filter((part) => part.length > 0)
-      .forEach((part) => {
-        if (part.includes('2P')) {
-          selected.add('2P');
-        }
-        if (part.includes('S1')) {
-          selected.add('S1');
-        }
-        if (part.includes('R1')) {
-          selected.add('R1');
-        }
-      });
-
-    return selected;
+    return parseMathOptionsFromBlokkMat(value);
   };
 
   const sortOptionStudents = (students: OptionStudent[]): OptionStudent[] => {
@@ -870,7 +892,9 @@ export const SubjectTally = ({
       const saved = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown);
       const slots = getGroupSlotsForSubject(item.subject);
       const groupMaxBySlotKey = Object.fromEntries(
-        slots.map((slot) => [slot.slotKey, String(slot.max)])
+        slots
+          .filter((slot) => sanitizeCount(slot.max, saved.defaultMax) !== sanitizeCount(saved.defaultMax))
+          .map((slot) => [slot.slotKey, String(slot.max)])
       ) as Record<string, string>;
 
       nextDrafts[item.subject] = {
@@ -909,7 +933,11 @@ export const SubjectTally = ({
         }
         next[item.subject] = {
           defaultMax: String(safeValue),
-          groupMaxBySlotKey: { ...(draft.groupMaxBySlotKey || {}) },
+          groupMaxBySlotKey: Object.fromEntries(
+            Object.entries(draft.groupMaxBySlotKey || {}).filter(([, value]) => {
+              return sanitizeCount(value, safeValue) !== safeValue;
+            })
+          ),
         };
       });
       return next;
@@ -933,7 +961,6 @@ export const SubjectTally = ({
       );
       const groupMaxBySlotKey = draft.groupMaxBySlotKey || {};
 
-      // Keep individual group max values intact. Only replace values equal to prior default.
       const nextGroups = (current.groups || []).map((group) => {
         const slotKey = slotByGroupId.get(group.id);
         if (slotKey && Object.prototype.hasOwnProperty.call(groupMaxBySlotKey, slotKey)) {
@@ -943,13 +970,10 @@ export const SubjectTally = ({
           };
         }
 
-        if (group.max === current.defaultMax) {
-          return {
-            ...group,
-            max: defaultMax,
-          };
-        }
-        return group;
+        return {
+          ...group,
+          max: defaultMax,
+        };
       });
 
       nextValues[item.subject] = {
@@ -971,10 +995,29 @@ export const SubjectTally = ({
       return {
         item,
         breakdown,
+        isMathOption: false,
         ...resolved,
       };
     });
   }, [subjects, mergedData, subjectSettingsByName]);
+
+  const displaySubjectRows = useMemo(() => {
+    if (!showMath) return subjectRows;
+
+    const mathRows = MATH_OPTION_KEYS
+      .map((key) => {
+        const displayName = MATH_OPTION_DISPLAY[key];
+        const breakdown = getBlokkBreakdown(displayName);
+        const totalStudents = BLOKK_LABELS.reduce((s, b) => s + breakdown[b], 0);
+        if (totalStudents === 0) return null;
+        const resolved = getResolvedForSubject(displayName, breakdown);
+        return { item: { subject: displayName, count: totalStudents }, breakdown, isMathOption: true, ...resolved };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    return [...subjectRows, ...mathRows]
+      .sort((a, b) => a.item.subject.localeCompare(b.item.subject, 'nb', { sensitivity: 'base' }));
+  }, [subjectRows, showMath, subjectStatsByKey]);
 
   if (subjects.length === 0) {
     return <div className={styles.empty}>Ingen fag funnet</div>;
@@ -983,6 +1026,21 @@ export const SubjectTally = ({
   return (
     <div className={styles.wrapper}>
       <div className={styles.toolbar}>
+        <label className={styles.mathToggleLabel}>
+          <input
+            type="checkbox"
+            checked={showMath}
+            onChange={(e) => setShowMath(e.target.checked)}
+          />
+          Vis matematikk
+        </label>
+        <button
+          className={styles.settingsBtn}
+          onClick={openOverfillModal}
+          title="Overfyllingsinnstillinger"
+        >
+          Set maks elever / fag
+        </button>
         <button
           className={styles.exportTableBtn}
           onClick={exportTable}
@@ -997,13 +1055,6 @@ export const SubjectTally = ({
         >
           Eksporter PDF
         </button>
-        <button
-          className={styles.settingsBtn}
-          onClick={openOverfillModal}
-          title="Overfyllingsinnstillinger"
-        >
-          Set maks elever / fag
-        </button>
       </div>
       <table className={styles.table}>
         <thead>
@@ -1013,80 +1064,114 @@ export const SubjectTally = ({
             <th>Blokk 2</th>
             <th>Blokk 3</th>
             <th>Blokk 4</th>
+            {showMath && <th>Matte</th>}
             <th>Totalt</th>
             <th>Handlinger</th>
           </tr>
         </thead>
         <tbody>
-          {subjectRows.map((row) => {
+          {displaySubjectRows.map((row) => {
+            const renderGroupCell = (
+              targetBlokk: BlokkLabel,
+              keySuffix: string,
+              titlePrefix?: string,
+              options?: {
+                entryFilter?: (entry: (typeof row.groupsByTarget)[BlokkLabel][number]) => boolean;
+                dropTargetBlokk?: BlokkLabel;
+                addTargetBlokk?: BlokkLabel;
+                showAddButton?: boolean;
+              }
+            ) => {
+              const entries = row.groupsByTarget[targetBlokk]
+                .filter(shouldShowGroup)
+                .filter((entry) => (options?.entryFilter ? options.entryFilter(entry) : true));
+              const groupGridClassName = entries.length <= 1
+                ? styles.groupCardsGridOne
+                : (entries.length === 2 || entries.length === 4)
+                  ? styles.groupCardsGridTwo
+                  : styles.groupCardsGridThree;
+              const blokkStudents = entries
+                .filter((entry) => entry.enabled)
+                .reduce((sum, entry) => sum + entry.allocatedCount, 0);
+              const blokkSpaces = entries
+                .filter((entry) => entry.enabled)
+                .reduce((sum, entry) => sum + entry.max, 0);
+
+              return (
+                <td
+                  key={`${row.item.subject}-${keySuffix}`}
+                  title={`${titlePrefix || targetBlokk} (${blokkStudents} / ${blokkSpaces})`}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (draggedSubject === row.item.subject && draggedGroupId) {
+                      moveGroupToBlokk(row.item.subject, draggedGroupId, options?.dropTargetBlokk || targetBlokk);
+                    }
+                    clearDraggedState();
+                  }}
+                >
+                  <div className={styles.groupStack}>
+                    <div className={`${styles.groupCardsGrid} ${groupGridClassName}`.trim()}>
+                      {entries.map((entry) => {
+                        const isAtMax = entry.enabled && !entry.overfilled && entry.allocatedCount === entry.max;
+                        return (
+                          <div
+                            key={`${row.item.subject}-${targetBlokk}-${entry.id}`}
+                            className={`${styles.groupCard} ${entry.enabled ? styles.groupCardActive : styles.groupCardInactive} ${isAtMax ? styles.groupCardAtMax : ''} ${entry.overfilled ? styles.groupCardOverfilled : ''}`.trim()}
+                            draggable={true}
+                            onDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = 'move';
+                              event.dataTransfer.setData('text/plain', `${row.item.subject}:${entry.id}`);
+                              setDraggedSubject(row.item.subject);
+                              setDraggedGroupId(entry.id);
+                            }}
+                            onDragEnd={clearDraggedState}
+                            title={`${entry.label} (${entry.allocatedCount} / ${entry.max})`}
+                          >
+                            <span className={styles.groupCount}>{entry.allocatedCount}</span>
+                          </div>
+                        );
+                      })}
+                      {entries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
+                    </div>
+                    {(options?.showAddButton ?? true) && (
+                      <button
+                        type="button"
+                        className={styles.groupAddButton}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addExtraGroupToTarget(row.item.subject, options?.addTargetBlokk || targetBlokk);
+                        }}
+                        title={`Legg til ny gruppe i ${titlePrefix || targetBlokk}`}
+                        aria-label={`Legg til ny gruppe i ${titlePrefix || targetBlokk}`}
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                </td>
+              );
+            };
+
             return (
               <tr key={row.item.subject} className={styles.subjectRow}>
                 <td className={styles.subjectNameCell}>{row.item.subject}</td>
                 {BLOKK_LABELS.map((targetBlokk) => {
-                  const entries = row.groupsByTarget[targetBlokk].filter(shouldShowGroup);
-                  const groupGridClassName = entries.length <= 1
-                    ? styles.groupCardsGridOne
-                    : (entries.length === 2 || entries.length === 4)
-                      ? styles.groupCardsGridTwo
-                      : styles.groupCardsGridThree;
-                  const blokkStudents = entries
-                    .filter((entry) => entry.enabled)
-                    .reduce((sum, entry) => sum + entry.allocatedCount, 0);
-                  const blokkSpaces = entries
-                    .filter((entry) => entry.enabled)
-                    .reduce((sum, entry) => sum + entry.max, 0);
-
-                  return (
-                    <td
-                      key={`${row.item.subject}-${targetBlokk}`}
-                      title={`${targetBlokk} (${blokkStudents} / ${blokkSpaces})`}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => {
-                        if (draggedSubject === row.item.subject && draggedGroupId) {
-                          moveGroupToBlokk(row.item.subject, draggedGroupId, targetBlokk);
-                        }
-                        clearDraggedState();
-                      }}
-                    >
-                      <div className={styles.groupStack}>
-                        <div className={`${styles.groupCardsGrid} ${groupGridClassName}`.trim()}>
-                          {entries.map((entry) => {
-                            return (
-                              <div
-                                key={`${row.item.subject}-${targetBlokk}-${entry.id}`}
-                                className={`${styles.groupCard} ${entry.enabled ? styles.groupCardActive : styles.groupCardInactive} ${entry.overfilled ? styles.groupCardOverfilled : ''}`.trim()}
-                                draggable={true}
-                                onDragStart={(event) => {
-                                  event.dataTransfer.effectAllowed = 'move';
-                                  event.dataTransfer.setData('text/plain', `${row.item.subject}:${entry.id}`);
-                                  setDraggedSubject(row.item.subject);
-                                  setDraggedGroupId(entry.id);
-                                }}
-                                onDragEnd={clearDraggedState}
-                                title={`${entry.label} (${entry.allocatedCount} / ${entry.max})`}
-                              >
-                                <span className={styles.groupCount}>{entry.allocatedCount}</span>
-                              </div>
-                            );
-                          })}
-                          {entries.length === 0 && <div className={styles.groupEmptySlot}>Tom</div>}
-                        </div>
-                        <button
-                          type="button"
-                          className={styles.groupAddButton}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            addExtraGroupToTarget(row.item.subject, targetBlokk);
-                          }}
-                          title={`Legg til ny gruppe i ${targetBlokk}`}
-                          aria-label={`Legg til ny gruppe i ${targetBlokk}`}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </td>
-                  );
+                  if (showMath && row.isMathOption && targetBlokk === 'Blokk 1') {
+                    return renderGroupCell(targetBlokk, targetBlokk, undefined, {
+                      entryFilter: (entry) => entry.sourceBlokk !== 'Blokk 1',
+                    });
+                  }
+                  return renderGroupCell(targetBlokk, targetBlokk);
                 })}
+                {showMath && (
+                  row.isMathOption
+                    ? renderGroupCell('Blokk 1', 'Matte', 'Matte', {
+                      entryFilter: (entry) => entry.sourceBlokk === 'Blokk 1',
+                      dropTargetBlokk: 'Blokk 1',
+                      addTargetBlokk: 'Blokk 1',
+                    })
+                    : <td className={styles.mathPlaceholderCell}>-</td>
+                )}
                 <td
                   className={styles.totalCell}
                   onDoubleClick={() => handleCopyTotal(row.item.subject, row.activeTotal)}
@@ -1318,8 +1403,7 @@ export const SubjectTally = ({
 
                     const groupSlots = getGroupSlotsForSubject(item.subject);
                     const hasCustomGroupMax = groupSlots.some((slot) => {
-                      const groupDraftValue = draft.groupMaxBySlotKey[slot.slotKey] ?? String(slot.max);
-                      return sanitizeCount(groupDraftValue, slot.max) !== sanitizeCount(draft.defaultMax, slot.max);
+                      return hasDraftGroupOverride(draft, slot);
                     });
                     const isExpanded = !!expandedSettingsBySubject[item.subject];
 
@@ -1353,7 +1437,12 @@ export const SubjectTally = ({
                                     ...prev,
                                     [item.subject]: {
                                       defaultMax: value,
-                                      groupMaxBySlotKey: { ...(prev[item.subject]?.groupMaxBySlotKey || {}) },
+                                      groupMaxBySlotKey: Object.fromEntries(
+                                        Object.entries(prev[item.subject]?.groupMaxBySlotKey || {}).filter(([, groupValue]) => {
+                                          return sanitizeCount(groupValue, sanitizeCount(value, DEFAULT_MAX_PER_SUBJECT))
+                                            !== sanitizeCount(value, DEFAULT_MAX_PER_SUBJECT);
+                                        })
+                                      ),
                                     },
                                   }));
                                 }}
@@ -1375,9 +1464,8 @@ export const SubjectTally = ({
                           </td>
                         </tr>
                         {isExpanded && groupSlots.map((slot) => {
-                          const value = draft.groupMaxBySlotKey[slot.slotKey] ?? String(slot.max);
-                          const isDifferentFromStandard =
-                            sanitizeCount(value, slot.max) !== sanitizeCount(draft.defaultMax, slot.max);
+                          const value = getDraftGroupMaxValue(draft, slot);
+                          const isDifferentFromStandard = hasDraftGroupOverride(draft, slot);
                           return (
                             <tr
                               key={`${item.subject}-${slot.slotKey}`}
@@ -1393,13 +1481,24 @@ export const SubjectTally = ({
                                     const nextValue = event.target.value;
                                     setDraftsBySubject((prev) => ({
                                       ...prev,
-                                      [item.subject]: {
-                                        defaultMax: prev[item.subject]?.defaultMax || draft.defaultMax,
-                                        groupMaxBySlotKey: {
-                                          ...(prev[item.subject]?.groupMaxBySlotKey || {}),
-                                          [slot.slotKey]: nextValue,
-                                        },
-                                      },
+                                      [item.subject]: (() => {
+                                        const nextDefaultMax = prev[item.subject]?.defaultMax || draft.defaultMax;
+                                        const nextOverrides = { ...(prev[item.subject]?.groupMaxBySlotKey || {}) };
+
+                                        if (
+                                          sanitizeCount(nextValue, sanitizeCount(nextDefaultMax, slot.max))
+                                          === sanitizeCount(nextDefaultMax, slot.max)
+                                        ) {
+                                          delete nextOverrides[slot.slotKey];
+                                        } else {
+                                          nextOverrides[slot.slotKey] = nextValue;
+                                        }
+
+                                        return {
+                                          defaultMax: nextDefaultMax,
+                                          groupMaxBySlotKey: nextOverrides,
+                                        };
+                                      })(),
                                     }));
                                   }}
                                   className={`${styles.maxInput} ${isDifferentFromStandard ? styles.maxInputWarning : ''}`.trim()}

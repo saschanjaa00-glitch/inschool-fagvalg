@@ -41,6 +41,17 @@
   white-space: nowrap;
 }
 
+.mathToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #315a84;
+  cursor: pointer;
+  user-select: none;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
