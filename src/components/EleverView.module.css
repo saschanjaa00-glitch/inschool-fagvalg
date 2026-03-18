@@ -124,8 +124,11 @@
 }
 
 .studentRow {
+  position: relative;
+  --student-row-border-color: #dddddd;
+  --student-row-arrow-color: #8c8c8c;
   width: 100%;
-  border: 1px solid #dddddd;
+  border: 1px solid var(--student-row-border-color);
   border-radius: 6px;
   background: #ffffff;
   text-align: left;
@@ -138,12 +141,35 @@
 }
 
 .studentRowActive {
-  border-color: #7ea8d6;
+  --student-row-border-color: #7ea8d6;
+  --student-row-arrow-color: #4f7fb8;
   background: #eaf4ff;
 }
 
+.studentRowActive::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -14px;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-left: 0;
+  border-right: 12px solid var(--student-row-arrow-color);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.18));
+}
+
+.studentRowPinnedOutsideFilter {
+  --student-row-border-color: #6ea36e;
+  --student-row-arrow-color: #4f8650;
+  background: #eef8ee;
+}
+
 .studentRowRemoved {
-  border-color: #d79a9a;
+  --student-row-border-color: #d79a9a;
+  --student-row-arrow-color: #b56767;
   background: #fff1f1;
 }
 
@@ -152,7 +178,8 @@
 }
 
 .studentRowNew {
-  border-color: #9ecfb0;
+  --student-row-border-color: #9ecfb0;
+  --student-row-arrow-color: #5f9a74;
   background: #eef9f1;
 }
 
@@ -161,12 +188,13 @@
 }
 
 .studentRowFourthYear {
-  border-color: #9ec2e3;
-  background: #eef5fd;
+  --student-row-border-color: #d1c0e8;
+  --student-row-arrow-color: #9276c0;
+  background: #faf7fe;
 }
 
 .studentRowFourthYear:hover {
-  background: #e3eefb;
+  background: #f4edfc;
 }
 
 .studentName {
@@ -217,8 +245,15 @@
 }
 
 .studentHeaderFourthYear {
-  background: #eef5fd;
-  border: 1px solid #b9d0ea;
+  background: #faf7fe;
+  border: 1px solid #dac9ef;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.studentHeaderPinnedOutsideFilter {
+  border: 1px solid #90c290;
+  background: #f1faf1;
   border-radius: 6px;
   padding: 8px;
 }

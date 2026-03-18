@@ -39,6 +39,7 @@ interface PersistedAppState {
   parsedFiles: ParsedFile[];
   mappings: Record<string, ColumnMapping>;
   mergedData: StandardField[];
+  baselineMergedData?: StandardField[];
   subjects: SubjectCount[];
   studentAssignmentChanges?: StudentAssignmentChange[];
   subjectSettingsByName: SubjectSettingsByName;
@@ -78,12 +79,150 @@ const arePersistedStatesEqual = (left: PersistedAppState, right: PersistedAppSta
   return JSON.stringify(left) === JSON.stringify(right);
 };
 
+const normalizeSubject = (value: string): string => {
+  return value.trim().toLocaleLowerCase('nb');
+};
+
+const isStudentStatusChange = (change: StudentAssignmentChange): boolean => {
+  if (change.changeCategory === 'student-status') {
+    return true;
+  }
+
+  if (change.studentStatusAction) {
+    return true;
+  }
+
+  const reasonLower = (change.reason || '').toLocaleLowerCase('nb');
+  return reasonLower.includes('la til elev')
+    || reasonLower.includes('fjernet elev fra elevlisten')
+    || reasonLower.includes('gjenla til elev i elevlisten');
+};
+
+const resolveStatusAction = (change: StudentAssignmentChange): 'added' | 'removed' | 'readded' | null => {
+  if (change.studentStatusAction) {
+    return change.studentStatusAction;
+  }
+
+  const reasonLower = (change.reason || '').toLocaleLowerCase('nb');
+  if (reasonLower.includes('gjenla til elev i elevlisten')) {
+    return 'readded';
+  }
+  if (reasonLower.includes('fjernet elev fra elevlisten')) {
+    return 'removed';
+  }
+  if (reasonLower.includes('la til elev')) {
+    return 'added';
+  }
+
+  return null;
+};
+
+const getSummarizedChangeLogCounts = (
+  changeLog: StudentAssignmentChange[]
+): { students: number; changes: number } => {
+  if (changeLog.length === 0) {
+    return { students: 0, changes: 0 };
+  }
+
+  const changesByStudentId = new Map<string, StudentAssignmentChange[]>();
+
+  changeLog.forEach((entry) => {
+    const existing = changesByStudentId.get(entry.studentId) || [];
+    existing.push(entry);
+    changesByStudentId.set(entry.studentId, existing);
+  });
+
+  let studentCount = 0;
+  let changeCount = 0;
+
+  changesByStudentId.forEach((studentChanges) => {
+    const oldestFirst = [...studentChanges].sort((left, right) => {
+      return new Date(left.changedAt).getTime() - new Date(right.changedAt).getTime();
+    });
+
+    const assignmentChanges = oldestFirst.filter((entry) => !isStudentStatusChange(entry));
+    const assignmentSummaryBySubject = new Map<
+      string,
+      { fromBlokk: number; toBlokk: number }
+    >();
+
+    assignmentChanges.forEach((entry) => {
+      const subjectKey = normalizeSubject(entry.subject || '');
+      if (!subjectKey) {
+        return;
+      }
+
+      const existing = assignmentSummaryBySubject.get(subjectKey);
+      if (!existing) {
+        assignmentSummaryBySubject.set(subjectKey, {
+          fromBlokk: entry.fromBlokk,
+          toBlokk: entry.toBlokk,
+        });
+        return;
+      }
+
+      existing.toBlokk = entry.toBlokk;
+    });
+
+    const summarizedAssignmentCount = Array.from(assignmentSummaryBySubject.values()).filter((entry) => {
+      return entry.fromBlokk !== entry.toBlokk;
+    }).length;
+
+    const statusEntriesRaw: Array<'added' | 'removed' | 'readded' | null> = [];
+    const openRemovedIndexes: number[] = [];
+
+    oldestFirst
+      .filter((entry) => isStudentStatusChange(entry))
+      .forEach((entry) => {
+        const action = resolveStatusAction(entry);
+        if (!action) {
+          return;
+        }
+
+        if (action === 'removed') {
+          statusEntriesRaw.push(action);
+          openRemovedIndexes.push(statusEntriesRaw.length - 1);
+          return;
+        }
+
+        if (action === 'readded') {
+          if (openRemovedIndexes.length > 0) {
+            const cancelledIndex = openRemovedIndexes.pop();
+            if (typeof cancelledIndex === 'number') {
+              statusEntriesRaw[cancelledIndex] = null;
+            }
+            return;
+          }
+
+          statusEntriesRaw.push(action);
+          return;
+        }
+
+        statusEntriesRaw.push(action);
+      });
+
+    const summarizedStatusCount = statusEntriesRaw.filter((entry) => entry !== null).length;
+    const summarizedTotal = summarizedAssignmentCount + summarizedStatusCount;
+
+    if (summarizedTotal > 0) {
+      studentCount += 1;
+      changeCount += summarizedTotal;
+    }
+  });
+
+  return {
+    students: studentCount,
+    changes: changeCount,
+  };
+};
+
 function App() {
   const jsonImportInputRef = useRef<HTMLInputElement | null>(null);
   const studentExportMenuRef = useRef<HTMLDivElement | null>(null);
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
   const [mappings, setMappings] = useState<Map<string, ColumnMapping>>(new Map());
   const [mergedData, setMergedData] = useState<StandardField[]>([]);
+  const [baselineMergedData, setBaselineMergedData] = useState<StandardField[]>([]);
   const [subjects, setSubjects] = useState<SubjectCount[]>([]);
   const [studentAssignmentChanges, setStudentAssignmentChanges] = useState<StudentAssignmentChange[]>([]);
   const [subjectSettingsByName, setSubjectSettingsByName] = useState<SubjectSettingsByName>({});
@@ -139,6 +278,7 @@ function App() {
     parsedFiles,
     mappings: Object.fromEntries(mappings.entries()),
     mergedData,
+    baselineMergedData,
     subjects,
     studentAssignmentChanges,
     subjectSettingsByName,
@@ -186,6 +326,9 @@ function App() {
         : new Map()
     );
     setMergedData(importedMergedData);
+    setBaselineMergedData(
+      Array.isArray(parsedState.baselineMergedData) ? parsedState.baselineMergedData : importedMergedData
+    );
     setSubjects(
       Array.isArray(parsedState.subjects)
         ? parsedState.subjects
@@ -483,6 +626,7 @@ function App() {
     });
 
     setMergedData(merged);
+    setBaselineMergedData(merged);
     setSubjects(tallySubjects(merged));
     setStudentAssignmentChanges([]);
     setNextBalancingRoundId(1);
@@ -515,6 +659,7 @@ function App() {
     setParsedFiles([]);
     setMappings(new Map());
     setMergedData([]);
+    setBaselineMergedData([]);
     setSubjects([]);
     setStudentAssignmentChanges([]);
     setSubjectSettingsByName({});
@@ -1081,9 +1226,9 @@ function App() {
 
   const hasImportSession = parsedFiles.length > 0 || mergedData.length > 0;
   const hasLoadedData = mergedData.length > 0;
-  const changeLogStudentCount = new Set(
-    studentAssignmentChanges.map((change) => change.studentId || `${change.navn}|${change.klasse}`)
-  ).size;
+  const summarizedChangeLogCounts = useMemo(() => {
+    return getSummarizedChangeLogCounts(studentAssignmentChanges);
+  }, [studentAssignmentChanges]);
 
   return (
     <div className="app">
@@ -1368,7 +1513,7 @@ function App() {
                         className={`data-tab ${activeDataTab === 'changelog' ? 'data-tab-active' : ''}`.trim()}
                         onClick={() => setActiveDataTab('changelog')}
                       >
-                        Logg ({changeLogStudentCount} elever, {studentAssignmentChanges.length} endringer)
+                        Logg ({summarizedChangeLogCounts.students} elever, {summarizedChangeLogCounts.changes} endringer)
                       </button>
                     </>
                   )}

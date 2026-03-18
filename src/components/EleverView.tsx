@@ -239,9 +239,13 @@ export const EleverView = ({
 }: EleverViewProps) => {
   const studentRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const hasInitializedSelectionRef = useRef(false);
+  const filterChangePendingRef = useRef(false);
+  const searchChangePendingRef = useRef(false);
   const [studentQuery, setStudentQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StudentFilter>('all');
   const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [stickyFilterStudentIds, setStickyFilterStudentIds] = useState<string[]>([]);
+  const [temporarilyPinnedStudentId, setTemporarilyPinnedStudentId] = useState('');
   const [subjectToAdd, setSubjectToAdd] = useState('');
   const [blokkToAdd, setBlokkToAdd] = useState('');
   const [warningIgnoreDraftByType, setWarningIgnoreDraftByType] = useState<Partial<Record<WarningType, string>>>({});
@@ -389,79 +393,177 @@ export const EleverView = ({
     });
   }, [activeFilter, studentQuery, studentSummaries]);
 
-  const visibleStudents = useMemo(() => {
-    if (!selectedStudentId) {
+  const searchQueryActive = studentQuery.trim().length > 0;
+
+  const effectiveFilteredStudents = useMemo(() => {
+    if (activeFilter === 'all' || searchQueryActive) {
       return filteredStudents;
     }
 
-    const alreadyVisible = filteredStudents.some((entry) => entry.studentId === selectedStudentId);
+    const currentIds = new Set(filteredStudents.map((entry) => entry.studentId));
+    const stickyEntries = stickyFilterStudentIds
+      .filter((studentId) => !currentIds.has(studentId))
+      .map((studentId) => studentSummaries.find((entry) => entry.studentId === studentId) || null)
+      .filter((entry): entry is (typeof studentSummaries)[number] => {
+        return !!entry && matchesSearch(entry.student, studentQuery, entry.index);
+      });
+
+    return [...filteredStudents, ...stickyEntries].sort((left, right) => {
+      if (left.removedFromElevlist !== right.removedFromElevlist) {
+        return left.removedFromElevlist ? 1 : -1;
+      }
+
+      const leftName = (left.student.navn || '').trim();
+      const rightName = (right.student.navn || '').trim();
+      const nameCompare = leftName.localeCompare(rightName, 'nb', { sensitivity: 'base' });
+      if (nameCompare !== 0) {
+        return nameCompare;
+      }
+
+      return (left.student.klasse || '').localeCompare(right.student.klasse || '', 'nb', { sensitivity: 'base' });
+    });
+  }, [activeFilter, filteredStudents, searchQueryActive, stickyFilterStudentIds, studentQuery, studentSummaries]);
+
+  const liveFilteredStudentIds = useMemo(() => {
+    return new Set(filteredStudents.map((entry) => entry.studentId));
+  }, [filteredStudents]);
+
+  const visibleStudents = useMemo(() => {
+    if (!selectedStudentId) {
+      return effectiveFilteredStudents;
+    }
+
+    if (searchQueryActive) {
+      return effectiveFilteredStudents;
+    }
+
+    if (temporarilyPinnedStudentId !== selectedStudentId) {
+      return effectiveFilteredStudents;
+    }
+
+    const alreadyVisible = effectiveFilteredStudents.some((entry) => entry.studentId === selectedStudentId);
     if (alreadyVisible) {
-      return filteredStudents;
+      return effectiveFilteredStudents;
     }
 
     const selectedEntry = studentSummaries.find((entry) => entry.studentId === selectedStudentId);
     if (!selectedEntry) {
-      return filteredStudents;
+      return effectiveFilteredStudents;
     }
 
-    return [selectedEntry, ...filteredStudents];
-  }, [filteredStudents, selectedStudentId, studentSummaries]);
+    return [selectedEntry, ...effectiveFilteredStudents];
+  }, [effectiveFilteredStudents, searchQueryActive, selectedStudentId, studentSummaries, temporarilyPinnedStudentId]);
 
   const selectedOutsideFilter = useMemo(() => {
-    if (!selectedStudentId) {
+    if (searchQueryActive || !selectedStudentId || temporarilyPinnedStudentId !== selectedStudentId) {
       return false;
     }
 
     return !filteredStudents.some((entry) => entry.studentId === selectedStudentId);
-  }, [filteredStudents, selectedStudentId]);
+  }, [filteredStudents, searchQueryActive, selectedStudentId, temporarilyPinnedStudentId]);
 
   useEffect(() => {
     if (selectedStudentId || hasInitializedSelectionRef.current) {
       return;
     }
 
-    if (filteredStudents.length > 0) {
+    if (effectiveFilteredStudents.length > 0) {
       hasInitializedSelectionRef.current = true;
-      setSelectedStudentId(filteredStudents[0].studentId);
+      setSelectedStudentId(effectiveFilteredStudents[0].studentId);
     }
-  }, [filteredStudents, selectedStudentId]);
+  }, [effectiveFilteredStudents, selectedStudentId]);
 
   useEffect(() => {
-    if (externallySelectedStudentId || selectedStudentId || filteredStudents.length === 0) {
+    if (externallySelectedStudentId || selectedStudentId || effectiveFilteredStudents.length === 0) {
       return;
     }
 
     hasInitializedSelectionRef.current = true;
-    setSelectedStudentId(filteredStudents[0].studentId);
-  }, [activationToken, externallySelectedStudentId, filteredStudents, selectedStudentId]);
+    setSelectedStudentId(effectiveFilteredStudents[0].studentId);
+  }, [activationToken, effectiveFilteredStudents, externallySelectedStudentId, selectedStudentId]);
+
+  useEffect(() => {
+    if (searchQueryActive) {
+      return;
+    }
+
+    if (activeFilter === 'all') {
+      if (stickyFilterStudentIds.length > 0) {
+        setStickyFilterStudentIds([]);
+      }
+      return;
+    }
+
+    const currentIds = filteredStudents.map((entry) => entry.studentId);
+
+    if (filterChangePendingRef.current) {
+      setStickyFilterStudentIds(currentIds);
+      return;
+    }
+
+    setStickyFilterStudentIds((prev) => {
+      const nextIds = new Set(prev);
+      currentIds.forEach((studentId) => nextIds.add(studentId));
+      const normalized = Array.from(nextIds).filter((studentId) => {
+        return studentSummaries.some((entry) => entry.studentId === studentId);
+      });
+
+      if (normalized.length === prev.length && normalized.every((studentId, index) => studentId === prev[index])) {
+        return prev;
+      }
+
+      return normalized;
+    });
+  }, [activeFilter, filteredStudents, searchQueryActive, stickyFilterStudentIds.length, studentSummaries]);
 
   useEffect(() => {
     if (studentSummaries.length === 0) {
       setSelectedStudentId('');
+      setStickyFilterStudentIds([]);
+      setTemporarilyPinnedStudentId('');
       return;
     }
 
     if (!selectedStudentId) {
-      if (filteredStudents.length > 0) {
-        setSelectedStudentId(filteredStudents[0].studentId);
+      if (effectiveFilteredStudents.length > 0) {
+        setSelectedStudentId(effectiveFilteredStudents[0].studentId);
+        setTemporarilyPinnedStudentId('');
       }
       return;
     }
 
     const stillExists = studentSummaries.some((entry) => entry.studentId === selectedStudentId);
     if (!stillExists) {
-      setSelectedStudentId(filteredStudents[0]?.studentId || '');
+      setStickyFilterStudentIds((prev) => prev.filter((studentId) => studentId !== selectedStudentId));
+      setTemporarilyPinnedStudentId('');
+      setSelectedStudentId(effectiveFilteredStudents[0]?.studentId || '');
+      return;
+    }
+
+    if (searchChangePendingRef.current) {
+      searchChangePendingRef.current = false;
+      setTemporarilyPinnedStudentId('');
+      setSelectedStudentId(effectiveFilteredStudents[0]?.studentId || '');
+      return;
+    }
+
+    if (filterChangePendingRef.current) {
+      filterChangePendingRef.current = false;
+      setTemporarilyPinnedStudentId('');
+      setSelectedStudentId(effectiveFilteredStudents[0]?.studentId || '');
       return;
     }
 
     const stillVisible = filteredStudents.some((entry) => entry.studentId === selectedStudentId);
     if (!stillVisible) {
-      setStatusMessage('Valgt elev er utenfor aktivt filter, men beholdes valgt.');
-      window.setTimeout(() => {
-        setStatusMessage('');
-      }, 2500);
+      setTemporarilyPinnedStudentId(selectedStudentId);
+      return;
     }
-  }, [activeFilter, filteredStudents, selectedStudentId, studentQuery, studentSummaries]);
+
+    if (temporarilyPinnedStudentId) {
+      setTemporarilyPinnedStudentId('');
+    }
+  }, [activeFilter, effectiveFilteredStudents, filteredStudents, selectedStudentId, studentQuery, studentSummaries, temporarilyPinnedStudentId]);
 
   useEffect(() => {
     setEditAssignment(null);
@@ -480,6 +582,8 @@ export const EleverView = ({
     hasInitializedSelectionRef.current = true;
     setActiveFilter('all');
     setStudentQuery('');
+    setStickyFilterStudentIds([]);
+    setTemporarilyPinnedStudentId('');
     setSelectedStudentId(externallySelectedStudentId);
 
     const scrollToSelectedRow = () => {
@@ -862,6 +966,24 @@ export const EleverView = ({
       ...prev,
       [type]: '',
     }));
+  };
+
+  const handleSelectFilter = (nextFilter: StudentFilter) => {
+    filterChangePendingRef.current = true;
+    setStickyFilterStudentIds([]);
+    setTemporarilyPinnedStudentId('');
+    setActiveFilter(nextFilter);
+  };
+
+  const handleStudentQueryChange = (value: string) => {
+    searchChangePendingRef.current = true;
+    setTemporarilyPinnedStudentId('');
+    setStudentQuery(value);
+  };
+
+  const handleSelectStudent = (studentId: string) => {
+    setTemporarilyPinnedStudentId('');
+    setSelectedStudentId(studentId);
   };
 
   const handleRemoveAssignment = (subject: string, blokkNumber: number) => {
@@ -1452,14 +1574,14 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'all' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('all')}
+            onClick={() => handleSelectFilter('all')}
           >
             Alle ({data.length})
           </button>
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'missing' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('missing')}
+            onClick={() => handleSelectFilter('missing')}
             disabled={counts.missing === 0}
           >
             Mangler fag ({counts.missing})
@@ -1467,7 +1589,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'overloaded' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('overloaded')}
+            onClick={() => handleSelectFilter('overloaded')}
             disabled={counts.overloaded === 0}
           >
             For mange fag ({counts.overloaded})
@@ -1475,7 +1597,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'collisions' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('collisions')}
+            onClick={() => handleSelectFilter('collisions')}
             disabled={counts.collisions === 0}
           >
             Blokk-kollisjoner ({counts.collisions})
@@ -1483,7 +1605,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'duplicates' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('duplicates')}
+            onClick={() => handleSelectFilter('duplicates')}
             disabled={counts.duplicates === 0}
           >
             Duplikater ({counts.duplicates})
@@ -1491,7 +1613,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'new' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('new')}
+            onClick={() => handleSelectFilter('new')}
             disabled={counts.newStudents === 0}
           >
             Nye elever ({counts.newStudents})
@@ -1499,7 +1621,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'removed' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('removed')}
+            onClick={() => handleSelectFilter('removed')}
             disabled={counts.removedStudents === 0}
           >
             Fjernet elever ({counts.removedStudents})
@@ -1507,7 +1629,7 @@ export const EleverView = ({
           <button
             type="button"
             className={`${styles.filterButton} ${activeFilter === 'fourthYear' ? styles.filterButtonActive : ''}`.trim()}
-            onClick={() => setActiveFilter('fourthYear')}
+            onClick={() => handleSelectFilter('fourthYear')}
             disabled={counts.fourthYearStudents === 0}
           >
             Fjerdeårselever ({counts.fourthYearStudents})
@@ -1525,7 +1647,7 @@ export const EleverView = ({
             type="search"
             className={styles.searchInput}
             value={studentQuery}
-            onChange={(event) => setStudentQuery(event.target.value)}
+            onChange={(event) => handleStudentQueryChange(event.target.value)}
             placeholder="Sok elevnavn, klasse eller id"
           />
 
@@ -1537,8 +1659,8 @@ export const EleverView = ({
                 ref={(element) => {
                   studentRowRefs.current[entry.studentId] = element;
                 }}
-                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''} ${entry.removedFromElevlist ? styles.studentRowRemoved : ''} ${!entry.removedFromElevlist && isManualStudentId(entry.studentId) ? styles.studentRowNew : ''} ${!entry.removedFromElevlist && !isManualStudentId(entry.studentId) && entry.student.fjerdearsElev ? styles.studentRowFourthYear : ''}`.trim()}
-                onClick={() => setSelectedStudentId(entry.studentId)}
+                className={`${styles.studentRow} ${entry.studentId === selectedStudentId ? styles.studentRowActive : ''} ${activeFilter !== 'all' && !liveFilteredStudentIds.has(entry.studentId) ? styles.studentRowPinnedOutsideFilter : ''} ${entry.removedFromElevlist ? styles.studentRowRemoved : ''} ${!entry.removedFromElevlist && isManualStudentId(entry.studentId) ? styles.studentRowNew : ''}`.trim()}
+                onClick={() => handleSelectStudent(entry.studentId)}
               >
                 <span className={styles.studentName}>
                   {entry.student.navn || 'Ukjent elev'}
@@ -1552,7 +1674,7 @@ export const EleverView = ({
                   {entry.student.klasse || 'Ingen klasse'} | {entry.assignments.length} fag
                   {entry.student.fjerdearsElev ? ' | Fjerdeårs-elev' : ''}
                   {entry.removedFromElevlist ? ' | Fjernet fra elevliste' : ''}
-                  {selectedOutsideFilter && entry.studentId === selectedStudentId ? ' | Vises utenfor filter' : ''}
+                  {activeFilter !== 'all' && !liveFilteredStudentIds.has(entry.studentId) ? ' | Vises utenfor filter' : ''}
                 </small>
               </button>
             ))}
@@ -1564,7 +1686,7 @@ export const EleverView = ({
             <p className={styles.empty}>Ingen elever matcher filteret.</p>
           ) : (
             <>
-              <div className={`${styles.studentHeader} ${selectedStudentEntry.removedFromElevlist ? styles.studentHeaderRemoved : ''} ${!selectedStudentEntry.removedFromElevlist && isManualStudentId(selectedStudentEntry.studentId) ? styles.studentHeaderNew : ''} ${!selectedStudentEntry.removedFromElevlist && !isManualStudentId(selectedStudentEntry.studentId) && selectedStudentEntry.student.fjerdearsElev ? styles.studentHeaderFourthYear : ''}`.trim()}>
+              <div className={`${styles.studentHeader} ${selectedOutsideFilter ? styles.studentHeaderPinnedOutsideFilter : ''} ${selectedStudentEntry.removedFromElevlist ? styles.studentHeaderRemoved : ''} ${!selectedStudentEntry.removedFromElevlist && isManualStudentId(selectedStudentEntry.studentId) ? styles.studentHeaderNew : ''}`.trim()}>
                 <div>
                   <h3>
                     {selectedStudentEntry.student.navn || 'Ukjent elev'}
@@ -1650,6 +1772,10 @@ export const EleverView = ({
                     </div>
                   ))}
                 </div>
+              )}
+
+              {selectedOutsideFilter && (
+                <p className={styles.statusMessage}>Valgt elev er utenfor aktivt filter, men beholdes midlertidig valgt.</p>
               )}
 
               {statusMessage && <p className={styles.statusMessage}>{statusMessage}</p>}
