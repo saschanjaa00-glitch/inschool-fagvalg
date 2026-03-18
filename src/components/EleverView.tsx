@@ -1717,7 +1717,7 @@ export const EleverView = ({
                   >
                     {selectedStudentEntry.student.fjerdearsElev
                       ? 'Fjern Fjerdeårs-elev status'
-                      : 'Sett som Fjerdeårs-elev - ignorer trinnrestriksjoner i balansering'}
+                      : 'Sett som Fjerdeårs-elev - bruker egne VG4-restriksjoner i balansering'}
                   </button>
                 </div>
               </div>
@@ -2062,7 +2062,7 @@ export const EleverView = ({
                   checked={newStudentIsFourthYear}
                   onChange={(event) => setNewStudentIsFourthYear(event.target.checked)}
                 />
-                Fjerdeårs-elev (teller som både VG2 og VG3 i balansering)
+                Fjerdeårs-elev (bruker VG4-restriksjoner i balansering)
               </label>
             </div>
 

@@ -267,7 +267,7 @@ const inferStudentId = (row: StandardField, index: number): string => {
 
 const inferClassLevels = (classGroup: string, isFourthYear: boolean): string[] => {
   if (isFourthYear) {
-    return ['VG2', 'VG3'];
+    return ['VG4'];
   }
 
   const match = classGroup.trim().toUpperCase().match(/^(\d)/);
@@ -377,11 +377,19 @@ const cloneState = (state: InternalState): InternalState => {
 };
 
 const isClassAllowedInBlock = (
+  studentId: string,
   classGroup: string,
   block: BlockNumber,
   restrictions: ClassBlockRestrictions,
   isFourthYear: boolean
 ): boolean => {
+  // Per-student override for fourth-year students takes precedence over VG4 class-level setting
+  if (isFourthYear && restrictions[studentId]) {
+    const studentRules = restrictions[studentId];
+    const allowed = studentRules[block];
+    return typeof allowed === 'boolean' ? allowed : true;
+  }
+
   const classLevels = inferClassLevels(classGroup, isFourthYear);
   if (classLevels.length === 0) {
     return true;
@@ -816,7 +824,7 @@ const moveIsFeasible = (
     return false;
   }
 
-  if (!isClassAllowedInBlock(student.classGroup, move.toBlock, restrictions, student.isFourthYear)) {
+  if (!isClassAllowedInBlock(student.id, student.classGroup, move.toBlock, restrictions, student.isFourthYear)) {
     return false;
   }
 
@@ -953,7 +961,7 @@ const pickRotationTargets = (
   const targets: RotationGroupTarget[] = [];
 
   for (const step of steps) {
-    if (!isClassAllowedInBlock(student.classGroup, step.toBlock, restrictions, student.isFourthYear)) {
+    if (!isClassAllowedInBlock(student.id, student.classGroup, step.toBlock, restrictions, student.isFourthYear)) {
       return null;
     }
 

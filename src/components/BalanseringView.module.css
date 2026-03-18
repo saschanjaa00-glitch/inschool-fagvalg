@@ -167,6 +167,83 @@
   background: #fad8d8;
 }
 
+.restrictionToggleInheritedOn {
+  background: #f0f9f4;
+  border-color: #b3d8c2;
+  color: #4a8a66;
+  font-style: italic;
+}
+
+.restrictionToggleInheritedOn:hover {
+  background: #e4f5ec;
+}
+
+.restrictionToggleInheritedOff {
+  background: #fdf5f5;
+  border-color: #e8b8b8;
+  color: #a85050;
+  font-style: italic;
+}
+
+.restrictionToggleInheritedOff:hover {
+  background: #f9eeee;
+}
+
+.vg4ExpandBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: #133e6f;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.vg4ExpandBtn:hover {
+  color: #1f6fb2;
+}
+
+.vg4StudentRow {
+  background: #f7fafd;
+}
+
+.vg4StudentCell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 16px;
+}
+
+.vg4StudentName {
+  flex: 1;
+  font-size: 11px;
+  color: #4a5d74;
+  word-break: break-word;
+}
+
+.vg4ResetBtn {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: #a85050;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.vg4ResetBtn:hover {
+  background: #fdeaea;
+  color: #7a1f1f;
+}
+
 .checkboxWrap {
   display: inline-flex;
   align-items: center;

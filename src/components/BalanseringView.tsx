@@ -26,7 +26,7 @@ interface BalanseringViewProps {
   onApplyResult: (result: ProgressiveHybridBalanceResult) => void;
 }
 
-const DEFAULT_CLASS_LEVELS = ['VG1', 'VG2', 'VG3'];
+const DEFAULT_CLASS_LEVELS = ['VG1', 'VG2', 'VG3', 'VG4'];
 const FIXED_COLLISION_WEIGHT = DEFAULT_BALANCING_CONFIG.weights.collisionD;
 const SETTING_DESCRIPTIONS = {
   overcapA: 'Straffer grupper som ligger over maks kapasitet. Høyere verdi gjør at overfylte grupper prioriteres hardere.',
@@ -77,6 +77,7 @@ const normalizeRestrictions = (input: ClassBlockRestrictions): ClassBlockRestric
     VG1: { 1: false, 2: false, 3: false, 4: false },
     VG2: { 1: false, 2: false, 3: false, 4: false },
     VG3: { 1: false, 2: false, 3: false, 4: false },
+    VG4: { 1: false, 2: false, 3: false, 4: false },
   };
 
   Object.entries(DEFAULT_CLASS_BLOCK_RESTRICTIONS).forEach(([classKey, map]) => {
@@ -97,7 +98,7 @@ const normalizeRestrictions = (input: ClassBlockRestrictions): ClassBlockRestric
 
 const inferClassLevels = (row: StandardField): string[] => {
   if (row.fjerdearsElev) {
-    return ['VG2', 'VG3'];
+    return ['VG4'];
   }
 
   const classGroup = row.klasse;
@@ -154,6 +155,7 @@ export const BalanseringView = ({
   const [excludedSubjectsExpanded, setExcludedSubjectsExpanded] = useState(false);
   const [excludedStudentsExpanded, setExcludedStudentsExpanded] = useState(false);
   const [expandedClassGroups, setExpandedClassGroups] = useState<Set<string>>(new Set());
+  const [vg4RowExpanded, setVg4RowExpanded] = useState(false);
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [lastResult, setLastResult] = useState<ProgressiveHybridBalanceResult | null>(null);
@@ -213,6 +215,17 @@ export const BalanseringView = ({
         students: students.sort((left, right) => left.name.localeCompare(right.name, 'nb', { sensitivity: 'base' })),
       }))
       .sort((left, right) => left.classGroup.localeCompare(right.classGroup, 'nb', { sensitivity: 'base' }));
+  }, [mergedData]);
+
+  const fourthYearStudents = useMemo(() => {
+    return mergedData
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => row.fjerdearsElev === true && !row.removedFromElevlist)
+      .map(({ row, index }) => ({
+        studentId: inferStudentId(row, index),
+        name: (row.navn || 'Ukjent').trim() || 'Ukjent',
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'nb', { sensitivity: 'base' }));
   }, [mergedData]);
 
   const lockableStudentIds = useMemo(() => {
@@ -407,6 +420,24 @@ export const BalanseringView = ({
     onRestrictionsChange(next);
   };
 
+  const updateStudentRestriction = (studentId: string, block: BlockNumber, allowed: boolean) => {
+    const base = effectiveRestrictions[studentId] || effectiveRestrictions['VG4'] || { 1: false, 2: false, 3: false, 4: false };
+    const next = {
+      ...effectiveRestrictions,
+      [studentId]: {
+        ...base,
+        [block]: allowed,
+      },
+    };
+    onRestrictionsChange(next);
+  };
+
+  const resetStudentRestriction = (studentId: string) => {
+    const next = { ...effectiveRestrictions };
+    delete next[studentId];
+    onRestrictionsChange(next);
+  };
+
   const allowAll = () => {
     const next = visibleClassLevels.reduce<ClassBlockRestrictions>((acc, classKey) => {
       acc[classKey] = { 1: true, 2: true, 3: true, 4: true };
@@ -536,6 +567,37 @@ export const BalanseringView = ({
             </thead>
             <tbody>
               {visibleClassLevels.map((classKey) => {
+                if (classKey === 'VG4') {
+                  return (
+                    <tr key="VG4-header">
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.vg4ExpandBtn}
+                          onClick={() => setVg4RowExpanded((prev) => !prev)}
+                          aria-expanded={vg4RowExpanded}
+                        >
+                          <span className={styles.chevron}>{vg4RowExpanded ? '▾' : '▸'}</span>
+                          VG4 (Fjerdeårs-elev)
+                        </button>
+                      </td>
+                      {([1, 2, 3, 4] as BlockNumber[]).map((block) => {
+                        const allowed = effectiveRestrictions['VG4']?.[block] ?? false;
+                        return (
+                          <td key={`VG4-${block}`}>
+                            <button
+                              type="button"
+                              className={`${styles.restrictionToggle} ${allowed ? styles.restrictionToggleOn : styles.restrictionToggleOff}`.trim()}
+                              onClick={() => updateRestriction('VG4', block, !allowed)}
+                            >
+                              {allowed ? 'Tillatt' : 'Ikke tillatt'}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={classKey}>
                     <td>{classKey}</td>
@@ -547,6 +609,54 @@ export const BalanseringView = ({
                             type="button"
                             className={`${styles.restrictionToggle} ${allowed ? styles.restrictionToggleOn : styles.restrictionToggleOff}`.trim()}
                             onClick={() => updateRestriction(classKey, block, !allowed)}
+                          >
+                            {allowed ? 'Tillatt' : 'Ikke tillatt'}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+              {vg4RowExpanded && fourthYearStudents.map(({ studentId, name }) => {
+                const hasOverride = !!effectiveRestrictions[studentId];
+                const getBlockAllowed = (block: BlockNumber): boolean => {
+                  if (hasOverride) {
+                    const v = effectiveRestrictions[studentId]?.[block];
+                    return typeof v === 'boolean' ? v : false;
+                  }
+                  const v = effectiveRestrictions['VG4']?.[block];
+                  return typeof v === 'boolean' ? v : false;
+                };
+                return (
+                  <tr key={studentId} className={styles.vg4StudentRow}>
+                    <td>
+                      <div className={styles.vg4StudentCell}>
+                        <span className={styles.vg4StudentName}>{name}</span>
+                        {hasOverride && (
+                          <button
+                            type="button"
+                            className={styles.vg4ResetBtn}
+                            onClick={() => resetStudentRestriction(studentId)}
+                            title="Tilbakestill til VG4-innstilling"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    {([1, 2, 3, 4] as BlockNumber[]).map((block) => {
+                      const allowed = getBlockAllowed(block);
+                      return (
+                        <td key={`${studentId}-${block}`}>
+                          <button
+                            type="button"
+                            className={`${styles.restrictionToggle} ${
+                              hasOverride
+                                ? allowed ? styles.restrictionToggleOn : styles.restrictionToggleOff
+                                : allowed ? styles.restrictionToggleInheritedOn : styles.restrictionToggleInheritedOff
+                            }`.trim()}
+                            onClick={() => updateStudentRestriction(studentId, block, !allowed)}
                           >
                             {allowed ? 'Tillatt' : 'Ikke tillatt'}
                           </button>
