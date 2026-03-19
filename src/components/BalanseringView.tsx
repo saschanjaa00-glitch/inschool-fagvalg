@@ -573,8 +573,8 @@ export const BalanseringView = ({
                 <span className={styles.overlayStatLabel}>Tid</span>
               </div>
               <div className={styles.overlayStat}>
-                <span className={styles.overlayStatValue}>{balancingProgress?.movesApplied ?? 0}</span>
-                <span className={styles.overlayStatLabel}>Flytt</span>
+                <span className={styles.overlayStatValue}>{balancingProgress?.swapsAttempted ?? 0}</span>
+                <span className={styles.overlayStatLabel}>Forsøk</span>
               </div>
               {(balancingProgress?.totalPasses ?? 0) > 0 && (
                 <div className={styles.overlayStat}>

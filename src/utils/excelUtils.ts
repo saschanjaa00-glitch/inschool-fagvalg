@@ -396,6 +396,14 @@ export interface StudentAssignmentChange {
   balancingRoundId?: number;
 }
 
+export interface GroupMoveLogEntry {
+  subject: string;
+  groupLabel: string;
+  fromBlokk: number;
+  toBlokk: number;
+  changedAt: string;
+}
+
 const parseSubjects = (value: string | null): string[] => {
   if (!value) {
     return [];

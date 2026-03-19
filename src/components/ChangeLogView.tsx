@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils';
+import type { StandardField, StudentAssignmentChange, GroupMoveLogEntry } from '../utils/excelUtils';
 import {
   BLOKK_LABELS,
   getBlokkNumber,
@@ -12,6 +12,7 @@ import styles from './ChangeLogView.module.css';
 
 interface ChangeLogViewProps {
   changeLog: StudentAssignmentChange[];
+  groupMoveLog: GroupMoveLogEntry[];
   currentStudents: StandardField[];
   subjectSettingsByName: SubjectSettingsByName;
   excludedSubjects: string[];
@@ -255,6 +256,7 @@ const formatStudentStatusLabel = (entry: StudentStatusLogEntry): string => {
 
 export const ChangeLogView = ({
   changeLog,
+  groupMoveLog,
   currentStudents,
   subjectSettingsByName,
   excludedSubjects,
@@ -262,6 +264,7 @@ export const ChangeLogView = ({
 }: ChangeLogViewProps) => {
   const [mode, setMode] = useState<LogMode>('summary');
   const [warningsExpanded, setWarningsExpanded] = useState(false);
+  const [groupMovesExpanded, setGroupMovesExpanded] = useState(true);
   const [studentStatusExpanded, setStudentStatusExpanded] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoundId, setSelectedRoundId] = useState<'final' | number>('final');
@@ -528,6 +531,64 @@ export const ChangeLogView = ({
     });
   }, [groupedSummaries, mode, searchQuery]);
 
+  const filteredGroupMoves = useMemo(() => {
+    if (groupMoveLog.length === 0) {
+      return [] as GroupMoveLogEntry[];
+    }
+
+    const tokens = parseSearchTokens(searchQuery);
+
+    const relevant = groupMoveLog.filter((entry) => {
+      if (tokens.length === 0) {
+        return true;
+      }
+      const searchable = `${entry.subject} ${entry.groupLabel}`.toLocaleLowerCase('nb');
+      return tokens.every((token) => searchable.includes(token));
+    });
+
+    if (mode === 'detailed') {
+      return [...relevant].sort((a, b) =>
+        new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
+      );
+    }
+
+    // Summary mode: compute net change per subject+groupLabel
+    const netByKey = new Map<string, { subject: string; groupLabel: string; fromBlokk: number; toBlokk: number; lastChangedAt: string }>();
+
+    // Process in chronological order for correct net computation
+    const chronological = [...relevant].sort((a, b) =>
+      new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime()
+    );
+
+    chronological.forEach((entry) => {
+      const key = `${entry.subject.trim().toLocaleLowerCase('nb')}::${entry.groupLabel.trim().toLocaleLowerCase('nb')}`;
+      const existing = netByKey.get(key);
+      if (!existing) {
+        netByKey.set(key, {
+          subject: entry.subject,
+          groupLabel: entry.groupLabel,
+          fromBlokk: entry.fromBlokk,
+          toBlokk: entry.toBlokk,
+          lastChangedAt: entry.changedAt,
+        });
+      } else {
+        existing.toBlokk = entry.toBlokk;
+        existing.lastChangedAt = entry.changedAt;
+      }
+    });
+
+    return Array.from(netByKey.values())
+      .filter((entry) => entry.fromBlokk !== entry.toBlokk)
+      .sort((a, b) => a.subject.localeCompare(b.subject, 'nb', { sensitivity: 'base' }))
+      .map((entry) => ({
+        subject: entry.subject,
+        groupLabel: entry.groupLabel,
+        fromBlokk: entry.fromBlokk,
+        toBlokk: entry.toBlokk,
+        changedAt: entry.lastChangedAt,
+      } as GroupMoveLogEntry));
+  }, [groupMoveLog, mode, searchQuery]);
+
   const excludedSubjectsSet = useMemo(() => {
     return new Set(
       excludedSubjects
@@ -718,7 +779,7 @@ export const ChangeLogView = ({
   };
 
   const handleExportToWord = () => {
-    if (filteredVisibleGroups.length === 0 && filteredStudentStatusEntries.length === 0) {
+    if (filteredVisibleGroups.length === 0 && filteredStudentStatusEntries.length === 0 && filteredGroupMoves.length === 0) {
       return;
     }
 
@@ -763,8 +824,19 @@ export const ChangeLogView = ({
         ? `<section><h2>Elever lagt til / fjernet</h2><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${statusRows}</table></section>`
         : '';
 
+      const groupMoveRows = filteredGroupMoves
+        .map((entry) => {
+          const style = getWordLineStyle('moved');
+          return `<tr><td style="${style}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.subject)}</strong> (${escapeHtml(entry.groupLabel)}): Blokk ${entry.fromBlokk} \u2192 Blokk ${entry.toBlokk}</td><td style="${style}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
+        })
+        .join('');
+
+      const groupMoveSection = groupMoveRows.length > 0
+        ? `<section><h2>Gruppeflyttinger</h2><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${groupMoveRows}</table></section>`
+        : '';
+
       const title = mode === 'detailed' ? 'Logg (detaljert)' : 'Logg (oppsummert)';
-      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p>${statusSection}<section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
+      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p>${groupMoveSection}${statusSection}<section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
 
       const blob = new Blob(['\ufeff', htmlDocument], { type: 'application/msword;charset=utf-8' });
       const filename = `logg-${mode}-${formatDateForFilename(generatedAt)}.doc`;
@@ -782,7 +854,7 @@ export const ChangeLogView = ({
     }
   };
 
-  if (changeLog.length === 0 && !hasBalancingWarnings) {
+  if (changeLog.length === 0 && groupMoveLog.length === 0 && !hasBalancingWarnings) {
     return <div className={styles.empty}>Ingen endringer registrert enda.</div>;
   }
 
@@ -892,6 +964,38 @@ export const ChangeLogView = ({
       </div>
 
       <div className={isRoundPreviewMode ? styles.previewOutline : ''}>
+      {filteredGroupMoves.length > 0 && (
+        <section className={styles.groupMovePanel}>
+          <button
+            type="button"
+            className={styles.statusToggleButton}
+            onClick={() => setGroupMovesExpanded((prev) => !prev)}
+            aria-expanded={groupMovesExpanded}
+          >
+            <span>{groupMovesExpanded ? '▼' : '▶'}</span>
+            <span className={styles.groupMovePanelTitle}>
+              Gruppeflyttinger ({filteredGroupMoves.length})
+            </span>
+          </button>
+
+          {groupMovesExpanded && (
+            <ul className={styles.statusList}>
+              {filteredGroupMoves.map((entry, index) => (
+                <li
+                  key={`gm-${entry.subject}-${entry.groupLabel}-${entry.changedAt}-${index}`}
+                  className={`${styles.changeItem} ${styles.changeItemMoved}`.trim()}
+                >
+                  <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                  <span>
+                    <strong>{entry.subject}</strong> ({entry.groupLabel}): {formatBlokk(entry.fromBlokk)} → {formatBlokk(entry.toBlokk)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {filteredStudentStatusEntries.length > 0 && (
         <section className={styles.statusPanel}>
           <button

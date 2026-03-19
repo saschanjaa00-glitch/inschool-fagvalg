@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import type { SubjectCount, StandardField } from '../utils/excelUtils';
+import type { SubjectCount, StandardField, GroupMoveLogEntry } from '../utils/excelUtils';
 import { getBlokkFields, loadXlsx } from '../utils/excelUtils';
 import {
   DEFAULT_MAX_PER_SUBJECT,
@@ -35,6 +35,7 @@ interface SubjectTallyProps {
     >
   ) => void;
   onRemoveStudentsFromSubject: (subject: string, studentIds: string[], reason: string) => void;
+  onGroupMoved: (entry: GroupMoveLogEntry) => void;
   onOpenStudentCard: (studentId: string) => void;
 }
 
@@ -177,6 +178,7 @@ export const SubjectTally = ({
   onSaveSubjectSettingsByName,
   onApplySubjectBlockMoves,
   onRemoveStudentsFromSubject,
+  onGroupMoved,
   onOpenStudentCard,
 }: SubjectTallyProps) => {
   const [showOverfillModal, setShowOverfillModal] = useState(false);
@@ -375,6 +377,16 @@ export const SubjectTally = ({
     });
 
     saveSubjectGroups(subject, nextGroups);
+
+    if (movingGroup && sourceBlokk && sourceBlokk !== targetBlokk) {
+      onGroupMoved({
+        subject,
+        groupLabel: movingGroup.label,
+        fromBlokk: getBlokkNumber(sourceBlokk),
+        toBlokk: getBlokkNumber(targetBlokk),
+        changedAt: new Date().toISOString(),
+      });
+    }
 
     if (shouldMoveStudentsWithGroup && sourceBlokk) {
       onApplySubjectBlockMoves(subject, [

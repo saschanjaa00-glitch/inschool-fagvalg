@@ -82,6 +82,7 @@ export interface SubjectMetrics {
 export interface BalancingProgress {
   phase: string;
   movesApplied: number;
+  swapsAttempted: number;
   pass: number;
   totalPasses: number;
 }
@@ -2133,15 +2134,16 @@ export const progressiveHybridBalance = (
   let lookaheadAttempts = 0;
   let lookaheadSuccess = 0;
   let lookaheadRollback = 0;
+  let swapsAttempted = 0;
 
   const capacityOffsets = normalizeCapacityOffsets(mergedConfig.capacityOffsets, mergedConfig.maxRelaxation);
   const totalPasses = capacityOffsets.length;
 
-  onProgress?.({ phase: 'Reparerer kollisjoner...', movesApplied: state.history.length, pass: 0, totalPasses });
+  onProgress?.({ phase: 'Reparerer kollisjoner...', movesApplied: state.history.length, swapsAttempted, pass: 0, totalPasses });
 
   for (const offset of capacityOffsets) {
     passesRun += 1;
-    onProgress?.({ phase: `Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`, movesApplied: state.history.length, pass: passesRun, totalPasses });
+    onProgress?.({ phase: `Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`, movesApplied: state.history.length, swapsAttempted, pass: passesRun, totalPasses });
     repairOvercapacity(state, mergedConfig, offset);
     let improving = true;
     let flowIterations = 0;
@@ -2152,7 +2154,8 @@ export const progressiveHybridBalance = (
       const flow = buildFlowNetwork(state, mergedConfig, offset);
       const solved = solveFlow(flow);
       const extracted = extractMovesFromFlow(solved);
-      const { applied } = applyMoves(state, extracted, mergedConfig, offset);
+      const { applied, skipped } = applyMoves(state, extracted, mergedConfig, offset);
+      swapsAttempted += applied.length + skipped.length;
 
       if (applied.length === 0) {
         improving = false;
@@ -2164,8 +2167,9 @@ export const progressiveHybridBalance = (
     lookaheadAttempts += local.lookaheadAttempts;
     lookaheadSuccess += local.lookaheadSuccess;
     lookaheadRollback += local.lookaheadRollback;
+    swapsAttempted += local.lookaheadAttempts;
 
-    onProgress?.({ phase: `Runde ${passesRun} ferdig — ${state.history.length} flytt totalt`, movesApplied: state.history.length, pass: passesRun, totalPasses });
+    onProgress?.({ phase: `Runde ${passesRun} ferdig — ${state.history.length} flytt totalt`, movesApplied: state.history.length, swapsAttempted, pass: passesRun, totalPasses });
 
     // Keep only states that satisfy strict capacity constraints as committable output.
     if (offset === 0) {

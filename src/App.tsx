@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import type { ParsedFile, ColumnMapping, StandardField, SubjectCount, StudentAssignmentChange } from './utils/excelUtils';
+import type { ParsedFile, ColumnMapping, StandardField, SubjectCount, StudentAssignmentChange, GroupMoveLogEntry } from './utils/excelUtils';
 import {
   mergeFiles,
   tallySubjects,
@@ -42,6 +42,7 @@ interface PersistedAppState {
   baselineMergedData?: StandardField[];
   subjects: SubjectCount[];
   studentAssignmentChanges?: StudentAssignmentChange[];
+  groupMoveLog?: GroupMoveLogEntry[];
   subjectSettingsByName: SubjectSettingsByName;
   warningIgnoresByStudentId?: Record<string, { comment: string; ignoredAt: string }>;
   warningIgnoresByStudentAndType?: Record<string, Partial<Record<WarningType, WarningIgnoreEntry>>>;
@@ -225,6 +226,7 @@ function App() {
   const [baselineMergedData, setBaselineMergedData] = useState<StandardField[]>([]);
   const [subjects, setSubjects] = useState<SubjectCount[]>([]);
   const [studentAssignmentChanges, setStudentAssignmentChanges] = useState<StudentAssignmentChange[]>([]);
+  const [groupMoveLog, setGroupMoveLog] = useState<GroupMoveLogEntry[]>([]);
   const [subjectSettingsByName, setSubjectSettingsByName] = useState<SubjectSettingsByName>({});
   const [blokkCount, setBlokkCount] = useState(4);
   const [nextBalancingRoundId, setNextBalancingRoundId] = useState(1);
@@ -281,6 +283,7 @@ function App() {
     baselineMergedData,
     subjects,
     studentAssignmentChanges,
+    groupMoveLog,
     subjectSettingsByName,
     warningIgnoresByStudentAndType,
     blokkCount,
@@ -338,6 +341,9 @@ function App() {
     );
     setStudentAssignmentChanges(
       Array.isArray(parsedState.studentAssignmentChanges) ? parsedState.studentAssignmentChanges : []
+    );
+    setGroupMoveLog(
+      Array.isArray(parsedState.groupMoveLog) ? parsedState.groupMoveLog : []
     );
     const maxRoundInChanges = Array.isArray(parsedState.studentAssignmentChanges)
       ? parsedState.studentAssignmentChanges.reduce((maxRound, change) => {
@@ -629,6 +635,7 @@ function App() {
     setBaselineMergedData(merged);
     setSubjects(tallySubjects(merged));
     setStudentAssignmentChanges([]);
+    setGroupMoveLog([]);
     setNextBalancingRoundId(1);
     setActiveDataTab('subjects');
     setSubjectSettingsAutoOpenToken((prev) => prev + 1);
@@ -662,6 +669,7 @@ function App() {
     setBaselineMergedData([]);
     setSubjects([]);
     setStudentAssignmentChanges([]);
+    setGroupMoveLog([]);
     setSubjectSettingsByName({});
     setWarningIgnoresByStudentAndType({});
     setWarningIgnoreDraftByStudentId({});
@@ -775,6 +783,10 @@ function App() {
     setMergedData(workingData);
     setSubjects(tallySubjects(workingData));
     setStudentAssignmentChanges((prev) => [...prev, ...allChanges]);
+  };
+
+  const handleGroupMoved = (entry: GroupMoveLogEntry) => {
+    setGroupMoveLog((prev) => [...prev, entry]);
   };
 
   const handleClearStoredData = () => {
@@ -1747,6 +1759,7 @@ function App() {
                   }}
                   onSaveSubjectSettingsByName={handleSaveSubjectSettingsByName}
                   onApplySubjectBlockMoves={handleApplySubjectBlockMoves}
+                  onGroupMoved={handleGroupMoved}
                   onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
                   onOpenStudentCard={handleOpenStudentInElever}
                 />
@@ -1772,6 +1785,7 @@ function App() {
               ) : activeDataTab === 'changelog' ? (
                 <ChangeLogView
                   changeLog={studentAssignmentChanges}
+                  groupMoveLog={groupMoveLog}
                   currentStudents={mergedData}
                   subjectSettingsByName={subjectSettingsByName}
                   excludedSubjects={balancingExcludedSubjects}
