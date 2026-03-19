@@ -38,5 +38,9 @@ export interface BalancingWorkerProgressResponse {
   progress: BalancingProgress;
 }
 
-export type BalancingWorkerInbound = BalancingWorkerRunRequest;
+export interface BalancingWorkerStopRequest {
+  type: 'stop';
+}
+
+export type BalancingWorkerInbound = BalancingWorkerRunRequest | BalancingWorkerStopRequest;
 export type BalancingWorkerOutbound = BalancingWorkerSuccessResponse | BalancingWorkerErrorResponse | BalancingWorkerProgressResponse;

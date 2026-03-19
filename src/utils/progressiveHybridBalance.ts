@@ -87,6 +87,49 @@ export interface BalancingProgress {
   totalPasses: number;
 }
 
+export class AbortBalancingError extends Error {
+  constructor() {
+    super('Balancing aborted');
+    this.name = 'AbortBalancingError';
+  }
+}
+
+class ProgressTracker {
+  swapsAttempted = 0;
+  pass = 0;
+  totalPasses = 0;
+  phase = '';
+  private getMovesApplied: () => number;
+  private onProgress?: (progress: BalancingProgress) => void;
+  private lastReportTime = 0;
+  private readonly throttleMs = 80;
+
+  constructor(getMovesApplied: () => number, onProgress?: (progress: BalancingProgress) => void) {
+    this.getMovesApplied = getMovesApplied;
+    this.onProgress = onProgress;
+  }
+
+  report(phase?: string): void {
+    if (phase !== undefined) this.phase = phase;
+    this.lastReportTime = Date.now();
+    this.onProgress?.({
+      phase: this.phase,
+      movesApplied: this.getMovesApplied(),
+      swapsAttempted: this.swapsAttempted,
+      pass: this.pass,
+      totalPasses: this.totalPasses,
+    });
+  }
+
+  tick(count: number = 1): void {
+    this.swapsAttempted += count;
+    const now = Date.now();
+    if (now - this.lastReportTime >= this.throttleMs) {
+      this.report();
+    }
+  }
+}
+
 export interface BalanceDiagnostics {
   beforeScore: ScoreBreakdown;
   afterScore: ScoreBreakdown;
@@ -222,8 +265,8 @@ export const DEFAULT_BALANCING_CONFIG: BalancingConfig = {
   epsilon: 0.0001,
   maxRelaxation: 10,
   maxFlowIterationsPerOffset: 250,
-  maxLookaheadAttempts: 300,
-  maxDepth2Chains: 150,
+  maxLookaheadAttempts: 150,
+  maxDepth2Chains: 60,
   classBlockRestrictions: DEFAULT_CLASS_BLOCK_RESTRICTIONS,
   excludedSubjects: [],
   lockedAssignmentKeys: [],
@@ -720,10 +763,18 @@ const computeSubjectImbalanceRaw = (sizes: number[]): number => {
   return penalty;
 };
 
+const isSingleGroupSubject = (state: InternalState, subjectCode: string): boolean => {
+  const groups = state.groupsBySubject.get(subjectCode);
+  return !groups || groups.length <= 1;
+};
+
 const computeOvercapSeatCountForExcluded = (state: InternalState, excludedSubjects: Set<string>): number => {
   let seatCount = 0;
   state.groups.forEach((group) => {
     if (isExcludedSubjectName(group.subjectName, excludedSubjects)) {
+      return;
+    }
+    if (isSingleGroupSubject(state, group.subjectCode)) {
       return;
     }
     seatCount += Math.max(0, group.size - group.capacity);
@@ -735,6 +786,9 @@ const computeOvercapRaw = (state: InternalState, excludedSubjects: Set<string>):
   let overcapRaw = 0;
   state.groups.forEach((group) => {
     if (isExcludedSubjectName(group.subjectName, excludedSubjects)) {
+      return;
+    }
+    if (isSingleGroupSubject(state, group.subjectCode)) {
       return;
     }
     const excess = Math.max(0, group.size - group.capacity);
@@ -760,7 +814,7 @@ export const computeScore = (
       return;
     }
 
-    if (sizes.length === 0) {
+    if (sizes.length <= 1) {
       return;
     }
 
@@ -1130,6 +1184,9 @@ export const buildFlowNetwork = (
       }
 
       const subjectGroups = state.groupsBySubject.get(assignment.subjectCode) || [];
+      if (subjectGroups.length <= 1) {
+        return;
+      }
       const sourceGroup = subjectGroups.find((group) => group.groupId === assignment.groupId);
       if (!sourceGroup) {
         return;
@@ -1325,6 +1382,7 @@ const generateStudentRotationCandidates = (
 
     const eligible = student.assignments
       .filter((assignment) => !assignment.locked)
+      .filter((assignment) => !isSingleGroupSubject(state, assignment.subjectCode))
       .filter((assignment) => (blockCounts.get(assignment.block) || 0) === 1)
       .sort((left, right) => {
         if (left.block !== right.block) {
@@ -1465,12 +1523,14 @@ const tryStudentRotationImprove = (state: InternalState, config: BalancingConfig
 const repairOvercapacity = (
   state: InternalState,
   config: BalancingConfig,
-  offset: number
+  offset: number,
+  tracker?: ProgressTracker
 ): number => {
   let appliedCount = 0;
   let improving = true;
+  const MAX_REPAIR_ITERATIONS = 100;
 
-  while (improving) {
+  while (improving && appliedCount < MAX_REPAIR_ITERATIONS) {
     improving = false;
 
     const excludedSubjects = toExcludedSubjectSet(config.excludedSubjects);
@@ -1481,9 +1541,14 @@ const repairOvercapacity = (
       break;
     }
 
-    const candidateEvaluations = generateAllCandidateMoves(state, config, offset)
-      .filter((candidate) => candidate.priorityTag === 'overcap')
+    const overcapCandidates = generateAllCandidateMoves(state, config, offset)
+      .filter((candidate) => candidate.priorityTag === 'overcap');
+
+    // Limit expensive clone+evaluate to top candidates (sorted by estimatedScoreDelta already)
+    const MAX_OVERCAP_EVALS = 50;
+    const candidateEvaluations = overcapCandidates.slice(0, MAX_OVERCAP_EVALS)
       .map((candidate) => {
+        tracker?.tick();
         const snapshot = cloneState(state);
         const applied = applyCandidateMoveToState(snapshot, candidate, 'overcap', 0, offset, config.classBlockRestrictions);
         if (!applied) {
@@ -1571,7 +1636,8 @@ export const tryLookaheadChain = (
   config: BalancingConfig,
   depth: 1 | 2,
   maxAttempts: number,
-  offset: number
+  offset: number,
+  tracker?: ProgressTracker
 ): { success: boolean; attempts: number; rollbacks: number } => {
   let attempts = 0;
   let rollbacks = 0;
@@ -1584,6 +1650,7 @@ export const tryLookaheadChain = (
     }
 
     attempts += 1;
+    tracker?.tick();
     const excludedSubjects = toExcludedSubjectSet(config.excludedSubjects);
     const baseline = computeScore(state, config.weights, state.history, excludedSubjects).total;
     const snapshot = cloneState(state);
@@ -1671,7 +1738,8 @@ export const tryLookaheadChain = (
 export const localSearchImprove = (
   state: InternalState,
   config: BalancingConfig,
-  offset: number
+  offset: number,
+  tracker?: ProgressTracker
 ): { lookaheadAttempts: number; lookaheadSuccess: number; lookaheadRollback: number } => {
   let lookaheadAttempts = 0;
   let lookaheadSuccess = 0;
@@ -1688,7 +1756,7 @@ export const localSearchImprove = (
     }
   }
 
-  const depth1 = tryLookaheadChain(state, config, 1, config.maxLookaheadAttempts, offset);
+  const depth1 = tryLookaheadChain(state, config, 1, config.maxLookaheadAttempts, offset, tracker);
   lookaheadAttempts += depth1.attempts;
   lookaheadRollback += depth1.rollbacks;
   if (depth1.success) {
@@ -1698,7 +1766,7 @@ export const localSearchImprove = (
 
   const remainingAttempts = Math.max(0, config.maxLookaheadAttempts - lookaheadAttempts);
   if (remainingAttempts > 0) {
-    const depth2 = tryLookaheadChain(state, config, 2, remainingAttempts, offset);
+    const depth2 = tryLookaheadChain(state, config, 2, remainingAttempts, offset, tracker);
     lookaheadAttempts += depth2.attempts;
     lookaheadRollback += depth2.rollbacks;
     if (depth2.success) {
@@ -1744,6 +1812,9 @@ const buildStudentCollisionMoves = (
     }
 
     const subjectGroups = state.groupsBySubject.get(assignment.subjectCode) || [];
+    if (subjectGroups.length <= 1) {
+      return;
+    }
     const sourceGroup = subjectGroups.find((group) => group.groupId === assignment.groupId);
     if (!sourceGroup) {
       return;
@@ -2068,7 +2139,7 @@ const collectSubjectMetrics = (state: InternalState, excludedSubjects: Set<strin
   const metrics: SubjectMetrics[] = [];
 
   state.groupsBySubject.forEach((groups) => {
-    if (groups.length === 0) {
+    if (groups.length <= 1) {
       return;
     }
 
@@ -2134,17 +2205,20 @@ export const progressiveHybridBalance = (
   let lookaheadAttempts = 0;
   let lookaheadSuccess = 0;
   let lookaheadRollback = 0;
-  let swapsAttempted = 0;
+
+  const tracker = new ProgressTracker(() => state.history.length, onProgress);
 
   const capacityOffsets = normalizeCapacityOffsets(mergedConfig.capacityOffsets, mergedConfig.maxRelaxation);
   const totalPasses = capacityOffsets.length;
+  tracker.totalPasses = totalPasses;
 
-  onProgress?.({ phase: 'Reparerer kollisjoner...', movesApplied: state.history.length, swapsAttempted, pass: 0, totalPasses });
+  tracker.report('Reparerer kollisjoner...');
 
   for (const offset of capacityOffsets) {
     passesRun += 1;
-    onProgress?.({ phase: `Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`, movesApplied: state.history.length, swapsAttempted, pass: passesRun, totalPasses });
-    repairOvercapacity(state, mergedConfig, offset);
+    tracker.pass = passesRun;
+    tracker.report(`Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`);
+    repairOvercapacity(state, mergedConfig, offset, tracker);
     let improving = true;
     let flowIterations = 0;
 
@@ -2155,7 +2229,7 @@ export const progressiveHybridBalance = (
       const solved = solveFlow(flow);
       const extracted = extractMovesFromFlow(solved);
       const { applied, skipped } = applyMoves(state, extracted, mergedConfig, offset);
-      swapsAttempted += applied.length + skipped.length;
+      tracker.tick(applied.length + skipped.length);
 
       if (applied.length === 0) {
         improving = false;
@@ -2163,13 +2237,12 @@ export const progressiveHybridBalance = (
       }
     }
 
-    const local = localSearchImprove(state, mergedConfig, offset);
+    const local = localSearchImprove(state, mergedConfig, offset, tracker);
     lookaheadAttempts += local.lookaheadAttempts;
     lookaheadSuccess += local.lookaheadSuccess;
     lookaheadRollback += local.lookaheadRollback;
-    swapsAttempted += local.lookaheadAttempts;
 
-    onProgress?.({ phase: `Runde ${passesRun} ferdig — ${state.history.length} flytt totalt`, movesApplied: state.history.length, swapsAttempted, pass: passesRun, totalPasses });
+    tracker.report(`Runde ${passesRun} ferdig — ${state.history.length} flytt totalt`);
 
     // Keep only states that satisfy strict capacity constraints as committable output.
     if (offset === 0) {

@@ -240,9 +240,9 @@
 }
 
 .modeBtnActive {
-  background: #fff;
-  border-color: #a9a9a9;
-  color: #222;
+  background: #e6f7e6;
+  border-color: #3a9a4a;
+  color: #1a5c2a;
 }
 
 .empty {
@@ -269,6 +269,26 @@
   background: #f6f6f6;
   font-size: 13px;
   color: #222;
+}
+
+.programHeading {
+  margin: 16px 0 6px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2a4a7f;
+  letter-spacing: 0.02em;
+}
+
+.programHeading:first-child {
+  margin-top: 0;
+}
+
+.programLabel {
+  margin-left: 8px;
+  font-weight: 400;
+  color: #a0aab8;
+  font-size: 12px;
 }
 
 .manualBadge {
@@ -333,6 +353,12 @@
   background: #eef5ff;
   border-left-color: #2a63b7;
   color: #1f3f6c;
+}
+
+.changeItemGroupMove {
+  background: #f0faf0;
+  border-left-color: #3a9a4a;
+  color: #1a5c2a;
 }
 
 .changeItemNotice {

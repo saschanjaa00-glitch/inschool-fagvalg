@@ -12,6 +12,7 @@ import {
   exportToExcelDetailed,
   removeSubjectAssignmentsForStudents,
 } from './utils/excelUtils';
+import { anonymizeStudents } from './utils/anonymize';
 import './App.css';
 import { FileUploader } from './components/FileUploader';
 import { ColumnMapper } from './components/ColumnMapper';
@@ -221,6 +222,7 @@ function App() {
   const jsonImportInputRef = useRef<HTMLInputElement | null>(null);
   const studentExportMenuRef = useRef<HTMLDivElement | null>(null);
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
+  const [anonymize, setAnonymize] = useState(false);
   const [mappings, setMappings] = useState<Map<string, ColumnMapping>>(new Map());
   const [mergedData, setMergedData] = useState<StandardField[]>([]);
   const [baselineMergedData, setBaselineMergedData] = useState<StandardField[]>([]);
@@ -617,7 +619,7 @@ function App() {
 
   const handleMerge = () => {
     captureUndoSnapshot();
-    const merged = mergeFiles(parsedFiles, mappings).sort((a, b) => {
+    let merged = mergeFiles(parsedFiles, mappings).sort((a, b) => {
       const classA = (a.klasse || '').trim();
       const classB = (b.klasse || '').trim();
       const classCompare = classA.localeCompare(classB, 'nb', { sensitivity: 'base' });
@@ -630,6 +632,10 @@ function App() {
       const nameB = (b.navn || '').trim();
       return nameA.localeCompare(nameB, 'nb', { sensitivity: 'base' });
     });
+
+    if (anonymize) {
+      merged = anonymizeStudents(merged);
+    }
 
     setMergedData(merged);
     setBaselineMergedData(merged);
@@ -1692,7 +1698,7 @@ function App() {
             <div className="data-tab-panel">
               {!hasLoadedData || activeDataTab === 'import' ? (
                 <>
-                  <FileUploader onFilesAdded={handleFilesAdded} />
+                  <FileUploader onFilesAdded={handleFilesAdded} anonymize={anonymize} onAnonymizeChange={setAnonymize} />
 
                   {parsedFiles.length > 0 && (
                     <>

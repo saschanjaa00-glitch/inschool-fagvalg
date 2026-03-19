@@ -95,3 +95,21 @@
   font-weight: 500;
   font-size: 12px;
 }
+
+.anonymizeLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: #5a6a7d;
+}
+
+.anonymizeCheckbox {
+  width: 15px;
+  height: 15px;
+  accent-color: #5a6a7d;
+  cursor: pointer;
+}

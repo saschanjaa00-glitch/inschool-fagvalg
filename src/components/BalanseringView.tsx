@@ -588,6 +588,13 @@ export const BalanseringView = ({
             {balancingProgress?.phase && (
               <p className={styles.overlayPhase}>{balancingProgress.phase}</p>
             )}
+            <button
+              type="button"
+              className={styles.stopBtn}
+              onClick={() => workerRef.current?.postMessage({ type: 'stop' })}
+            >
+              Stopp
+            </button>
           </div>
         </div>
       )}

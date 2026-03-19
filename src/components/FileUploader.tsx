@@ -5,9 +5,11 @@ import styles from './FileUploader.module.css';
 
 interface FileUploaderProps {
   onFilesAdded: (files: ParsedFile[]) => void;
+  anonymize: boolean;
+  onAnonymizeChange: (value: boolean) => void;
 }
 
-export const FileUploader = ({ onFilesAdded }: FileUploaderProps) => {
+export const FileUploader = ({ onFilesAdded, anonymize, onAnonymizeChange }: FileUploaderProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +150,16 @@ export const FileUploader = ({ onFilesAdded }: FileUploaderProps) => {
         <p className={styles.subText}>
           Støtter .xlsx og .xls filer
         </p>
+      </label>
+
+      <label className={styles.anonymizeLabel}>
+        <input
+          type="checkbox"
+          checked={anonymize}
+          onChange={(e) => onAnonymizeChange(e.target.checked)}
+          className={styles.anonymizeCheckbox}
+        />
+        <span>Anonymiser elevnavn</span>
       </label>
 
       {error && (

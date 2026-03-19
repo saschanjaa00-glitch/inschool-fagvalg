@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { StandardField, StudentAssignmentChange, GroupMoveLogEntry } from '../utils/excelUtils';
+import { loadXlsx } from '../utils/excelUtils';
 import {
   BLOKK_LABELS,
   getBlokkNumber,
@@ -263,6 +264,7 @@ export const ChangeLogView = ({
   onOpenStudentCard,
 }: ChangeLogViewProps) => {
   const [mode, setMode] = useState<LogMode>('summary');
+  const [sortBy, setSortBy] = useState<'name' | 'programomrade'>('name');
   const [warningsExpanded, setWarningsExpanded] = useState(false);
   const [groupMovesExpanded, setGroupMovesExpanded] = useState(true);
   const [studentStatusExpanded, setStudentStatusExpanded] = useState(true);
@@ -484,25 +486,47 @@ export const ChangeLogView = ({
 
   const filteredVisibleGroups = useMemo(() => {
     const tokens = parseSearchTokens(searchQuery);
-    if (tokens.length === 0) {
-      return visibleChangeGroups;
+    let result = tokens.length === 0
+      ? visibleChangeGroups
+      : visibleChangeGroups.filter((group) => {
+        const searchableName = `${group.navn} ${group.klasse}`.toLocaleLowerCase('nb');
+        const subjectSet = new Set<string>([
+          ...group.detailedAssignmentChanges.map((entry) => entry.subject),
+          ...group.summaryEntries.map((entry) => entry.subject),
+        ]);
+        const searchableSubjects = Array.from(subjectSet)
+          .join(' ')
+          .toLocaleLowerCase('nb');
+
+        return tokens.every((token) => {
+          return searchableName.includes(token) || searchableSubjects.includes(token);
+        });
+      });
+
+    if (sortBy === 'programomrade') {
+      const getProgramomrade = (studentId: string, navn: string, klasse: string): string => {
+        const student = studentsById.get(studentId)
+          || studentsByNameClass.get(`${navn.trim().toLocaleLowerCase('nb')}|${klasse.trim().toLocaleLowerCase('nb')}`);
+        return student?.programomrade || '';
+      };
+
+      result = [...result].sort((a, b) => {
+        const progA = getProgramomrade(a.studentId, a.navn, a.klasse);
+        const progB = getProgramomrade(b.studentId, b.navn, b.klasse);
+        // Extract leading number for numeric sort (2 before 3)
+        const numA = parseInt(progA.match(/(\d+)/)?.[1] || '999', 10);
+        const numB = parseInt(progB.match(/(\d+)/)?.[1] || '999', 10);
+        if (numA !== numB) return numA - numB;
+        const progCompare = progA.localeCompare(progB, 'nb', { sensitivity: 'base' });
+        if (progCompare !== 0) return progCompare;
+        const nameCompare = a.navn.localeCompare(b.navn, 'nb', { sensitivity: 'base' });
+        if (nameCompare !== 0) return nameCompare;
+        return a.klasse.localeCompare(b.klasse, 'nb', { sensitivity: 'base' });
+      });
     }
 
-    return visibleChangeGroups.filter((group) => {
-      const searchableName = `${group.navn} ${group.klasse}`.toLocaleLowerCase('nb');
-      const subjectSet = new Set<string>([
-        ...group.detailedAssignmentChanges.map((entry) => entry.subject),
-        ...group.summaryEntries.map((entry) => entry.subject),
-      ]);
-      const searchableSubjects = Array.from(subjectSet)
-        .join(' ')
-        .toLocaleLowerCase('nb');
-
-      return tokens.every((token) => {
-        return searchableName.includes(token) || searchableSubjects.includes(token);
-      });
-    });
-  }, [searchQuery, visibleChangeGroups]);
+    return result;
+  }, [searchQuery, sortBy, studentsById, studentsByNameClass, visibleChangeGroups]);
 
   const filteredStudentStatusEntries = useMemo(() => {
     const tokens = parseSearchTokens(searchQuery);
@@ -778,6 +802,97 @@ export const ChangeLogView = ({
     );
   };
 
+  const handleExportToExcel = async () => {
+    // Only export students with actual summary changes (fromBlokk !== toBlokk)
+    const studentsWithChanges = groupedSummaries.filter((group) => group.summaryEntries.length > 0);
+    if (studentsWithChanges.length === 0) {
+      return;
+    }
+
+    try {
+      const XLSX = await loadXlsx();
+
+      // Determine max blokk count from the data (use 4 as standard)
+      const maxBlokk = 4;
+
+      // Build header row: Navn | Programområde | Blokk 1 | Blokk 2 | ...
+      const headerRow: string[] = ['Navn', 'Programområde'];
+      for (let b = 1; b <= maxBlokk; b++) {
+        headerRow.push(`Blokk ${b}`);
+      }
+
+      const dataRows: string[][] = [headerRow];
+
+      studentsWithChanges.forEach((group) => {
+        const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
+        const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
+        const programomrade = currentStudent?.programomrade || '';
+
+        // Build a map: for each blokk, what subject is there now and what changed
+        const blokkSubjects: string[] = new Array(maxBlokk).fill('');
+        const blokkChanges: string[] = new Array(maxBlokk).fill('');
+
+        // Fill final subjects from current student data
+        for (let b = 1; b <= maxBlokk; b++) {
+          const blokkField = `blokk${b}` as BlokkField;
+          const subjects = currentStudent ? parseSubjects(currentStudent[blokkField] as string | null | undefined) : [];
+          blokkSubjects[b - 1] = subjects.join(', ');
+        }
+
+        // Fill change info from summary entries
+        group.summaryEntries.forEach((entry) => {
+          if (entry.toBlokk > 0 && entry.toBlokk <= maxBlokk) {
+            if (entry.fromBlokk > 0) {
+              const changeText = `(${entry.fromBlokk} til ${entry.toBlokk})`;
+              blokkChanges[entry.toBlokk - 1] = blokkChanges[entry.toBlokk - 1]
+                ? `${blokkChanges[entry.toBlokk - 1]} ${changeText}`
+                : changeText;
+            } else {
+              const changeText = '(lagt til)';
+              blokkChanges[entry.toBlokk - 1] = blokkChanges[entry.toBlokk - 1]
+                ? `${blokkChanges[entry.toBlokk - 1]} ${changeText}`
+                : changeText;
+            }
+          } else if (entry.fromBlokk > 0 && entry.toBlokk <= 0 && entry.fromBlokk <= maxBlokk) {
+            const changeText = '(fjernet)';
+            blokkChanges[entry.fromBlokk - 1] = blokkChanges[entry.fromBlokk - 1]
+              ? `${blokkChanges[entry.fromBlokk - 1]} ${changeText}`
+              : changeText;
+          }
+        });
+
+        const row: string[] = [group.navn, programomrade];
+        for (let b = 0; b < maxBlokk; b++) {
+          const cell = blokkChanges[b]
+            ? `${blokkSubjects[b]} ${blokkChanges[b]}`
+            : blokkSubjects[b];
+          row.push(cell);
+        }
+        dataRows.push(row);
+      });
+
+      const worksheet = XLSX.utils.aoa_to_sheet(dataRows);
+
+      // Auto-size columns
+      const colWidths = headerRow.map((_, colIndex) => {
+        let maxLen = 0;
+        dataRows.forEach((row) => {
+          const cellLen = (row[colIndex] || '').length;
+          if (cellLen > maxLen) maxLen = cellLen;
+        });
+        return { wch: Math.max(maxLen + 2, 10) };
+      });
+      worksheet['!cols'] = colWidths;
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Logg');
+      XLSX.writeFile(workbook, `logg-endringer-${formatDateForFilename(new Date())}.xlsx`);
+    } catch (error) {
+      console.error('Kunne ikke eksportere logg til Excel:', error);
+      window.alert('Kunne ikke eksportere logg til Excel. Prøv igjen.');
+    }
+  };
+
   const handleExportToWord = () => {
     if (filteredVisibleGroups.length === 0 && filteredStudentStatusEntries.length === 0 && filteredGroupMoves.length === 0) {
       return;
@@ -786,10 +901,11 @@ export const ChangeLogView = ({
     try {
       const generatedAt = new Date();
 
-      const studentRows = filteredVisibleGroups.map((group) => {
+      const buildStudentHtml = (group: typeof filteredVisibleGroups[number]) => {
         const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
         const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
         const finalSelection = formatFinalAllocation(currentStudent);
+        const prog = currentStudent?.programomrade || '';
 
         const changeLines = mode === 'detailed'
           ? group.detailedAssignmentChanges
@@ -805,8 +921,35 @@ export const ChangeLogView = ({
             })
             .join('');
 
-        return `<section class="student"><h3>${escapeHtml(group.navn)} (${escapeHtml(group.klasse)})</h3><p class="student-meta">${escapeHtml(finalSelection || 'Ingen aktive fagvalg registrert')}</p><div class="student-change-block"><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${changeLines}</table></div><div class="student-spacer">&nbsp;</div></section>`;
-      }).join('');
+        const progLabel = prog ? ` <span style="color:#687c98;font-weight:normal;font-size:9pt;">\u2014 ${escapeHtml(prog)}</span>` : '';
+
+        return `<section class="student"><h3>${escapeHtml(group.navn)} (${escapeHtml(group.klasse)})${progLabel}</h3><p class="student-meta">${escapeHtml(finalSelection || 'Ingen aktive fagvalg registrert')}</p><div class="student-change-block"><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${changeLines}</table></div><div class="student-spacer">&nbsp;</div></section>`;
+      };
+
+      let studentRows: string;
+      if (sortBy === 'programomrade') {
+        // Group students by programområde with section headers
+        const groupsByProg = new Map<string, typeof filteredVisibleGroups>();
+        filteredVisibleGroups.forEach((group) => {
+          const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
+          const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
+          const prog = currentStudent?.programomrade || 'Ukjent programområde';
+          const existing = groupsByProg.get(prog);
+          if (existing) {
+            existing.push(group);
+          } else {
+            groupsByProg.set(prog, [group]);
+          }
+        });
+        const progSections: string[] = [];
+        groupsByProg.forEach((groups, prog) => {
+          const studentsHtml = groups.map(buildStudentHtml).join('');
+          progSections.push(`<h2 style="font-size:14pt;margin:20px 0 8px;padding-bottom:4px;border-bottom:2px solid #c0cfe0;color:#2c3e50;">${escapeHtml(prog)}</h2>${studentsHtml}`);
+        });
+        studentRows = progSections.join('');
+      } else {
+        studentRows = filteredVisibleGroups.map(buildStudentHtml).join('');
+      }
 
       const statusRows = filteredStudentStatusEntries
         .map((entry) => {
@@ -836,7 +979,8 @@ export const ChangeLogView = ({
         : '';
 
       const title = mode === 'detailed' ? 'Logg (detaljert)' : 'Logg (oppsummert)';
-      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p>${groupMoveSection}${statusSection}<section><h2>Elevendringer</h2>${studentRows}</section></body></html>`;
+      const studentSectionHeader = sortBy === 'programomrade' ? '' : '<h2>Elevendringer</h2>';
+      const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1f2b3d;margin:24px;}h1{font-size:18pt;margin:0 0 14px;}h2{font-size:13pt;margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid #d9e3f0;}.intro{margin:0 0 10px;color:#5b6d86;}h3{font-size:13pt;margin:0 0 6px;}.student{padding:8px 0;}.student-meta{margin:0 0 8px;color:#5b6d86;}.student-change-block{margin-top:8px;}.student-spacer{height:24pt;line-height:24pt;font-size:1pt;}</style></head><body><h1>${escapeHtml(title)}</h1><p class="intro">Generert: ${escapeHtml(formatTimestamp(generatedAt.toISOString()))}</p>${groupMoveSection}${statusSection}<section>${studentSectionHeader}${studentRows}</section></body></html>`;
 
       const blob = new Blob(['\ufeff', htmlDocument], { type: 'application/msword;charset=utf-8' });
       const filename = `logg-${mode}-${formatDateForFilename(generatedAt)}.doc`;
@@ -923,6 +1067,22 @@ export const ChangeLogView = ({
               Detaljert logg
             </button>
           </div>
+          <div className={styles.modeToggle}>
+            <button
+              type="button"
+              className={`${styles.modeBtn} ${sortBy === 'name' ? styles.modeBtnActive : ''}`.trim()}
+              onClick={() => setSortBy('name')}
+            >
+              Sortér: Navn
+            </button>
+            <button
+              type="button"
+              className={`${styles.modeBtn} ${sortBy === 'programomrade' ? styles.modeBtnActive : ''}`.trim()}
+              onClick={() => setSortBy('programomrade')}
+            >
+              Sortér: Programområde
+            </button>
+          </div>
           <input
             type="search"
             className={styles.searchInput}
@@ -957,6 +1117,9 @@ export const ChangeLogView = ({
               </span>
             )}
           </div>
+          <button type="button" className={styles.exportBtn} onClick={handleExportToExcel}>
+            Eksporter til Excel
+          </button>
           <button type="button" className={styles.exportBtn} onClick={handleExportToWord}>
             Eksporter til Word
           </button>
@@ -983,7 +1146,7 @@ export const ChangeLogView = ({
               {filteredGroupMoves.map((entry, index) => (
                 <li
                   key={`gm-${entry.subject}-${entry.groupLabel}-${entry.changedAt}-${index}`}
-                  className={`${styles.changeItem} ${styles.changeItemMoved}`.trim()}
+                  className={`${styles.changeItem} ${styles.changeItemGroupMove}`.trim()}
                 >
                   <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
                   <span>
@@ -1056,8 +1219,31 @@ export const ChangeLogView = ({
             : 'Ingen elever matcher søket.'}
         </div>
       ) : (
-        filteredVisibleGroups.map((group) => (
-          <section key={group.studentId} className={styles.studentBlock}>
+        filteredVisibleGroups.map((group, groupIndex) => {
+          const studentKey = `${group.navn.trim().toLocaleLowerCase('nb')}|${group.klasse.trim().toLocaleLowerCase('nb')}`;
+          const currentStudent = studentsById.get(group.studentId) || studentsByNameClass.get(studentKey);
+          const programomrade = currentStudent?.programomrade || '';
+
+          // Show programområde group heading when sorted by programområde
+          let showProgramHeading = false;
+          if (sortBy === 'programomrade') {
+            if (groupIndex === 0) {
+              showProgramHeading = true;
+            } else {
+              const prevGroup = filteredVisibleGroups[groupIndex - 1];
+              const prevKey = `${prevGroup.navn.trim().toLocaleLowerCase('nb')}|${prevGroup.klasse.trim().toLocaleLowerCase('nb')}`;
+              const prevStudent = studentsById.get(prevGroup.studentId) || studentsByNameClass.get(prevKey);
+              const prevProg = prevStudent?.programomrade || '';
+              showProgramHeading = prevProg !== programomrade;
+            }
+          }
+
+          return (
+            <div key={group.studentId}>
+              {showProgramHeading && (
+                <h3 className={styles.programHeading}>{programomrade || 'Ukjent programområde'}</h3>
+              )}
+              <section className={styles.studentBlock}>
             <h4 className={styles.studentHeader}>
               {onOpenStudentCard ? (
                 <button
@@ -1071,7 +1257,9 @@ export const ChangeLogView = ({
                       +
                     </span>
                   ) : null}
-                  {' '}({group.klasse}) - {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
+                  {' '}({group.klasse})
+                  {programomrade && <span className={styles.programLabel}>{programomrade}</span>}
+                  {' '}- {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
                 </button>
               ) : (
                 <>
@@ -1081,7 +1269,9 @@ export const ChangeLogView = ({
                       +
                     </span>
                   ) : null}
-                  {' '}({group.klasse}) - {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
+                  {' '}({group.klasse})
+                  {programomrade && <span className={styles.programLabel}>{programomrade}</span>}
+                  {' '}- {mode === 'detailed' ? group.detailedAssignmentChanges.length : group.summaryEntries.length} endringer
                 </>
               )}
             </h4>
@@ -1120,7 +1310,9 @@ export const ChangeLogView = ({
                 })}
             </ul>
           </section>
-        ))
+            </div>
+          );
+        })
       )}
       </div>
     </div>

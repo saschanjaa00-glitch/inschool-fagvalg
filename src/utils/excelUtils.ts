@@ -15,6 +15,7 @@ export interface ParsedFile {
   filename: string;
   columns: string[];
   data: Record<string, string>[];
+  programomrade?: string;
 }
 
 export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
@@ -31,6 +32,13 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
         
         // Read all rows as arrays first
         const allRows = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1 }) as string[][];
+
+        // Cell A1 contains the Programområde for all students on this sheet.
+        // The first word (typically "Valg") is a label prefix — strip it for display.
+        const rawProgramomrade = (allRows[0] && allRows[0][0]) ? String(allRows[0][0]).trim() : undefined;
+        const programomrade = rawProgramomrade
+          ? rawProgramomrade.replace(/^\S+\s+/, '').trim() || rawProgramomrade
+          : undefined;
         
         if (allRows.length < 6) {
           reject(new Error('Excel file must have at least 6 rows (headers in rows 4-5, data starts from row 6)'));
@@ -103,6 +111,7 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
           filename: file.name,
           columns: headers,
           data: jsonData,
+          programomrade: programomrade || undefined,
         });
       } catch (error) {
         reject(error);
@@ -159,6 +168,7 @@ const isMathR1Header = (header: string): boolean => {
 
 export interface StandardField {
   studentId?: string;
+  programomrade?: string;
   fjerdearsElev?: boolean;
   removedFromElevlist?: boolean;
   removedAssignmentsSnapshot?: {
@@ -320,6 +330,7 @@ export const mergeFiles = (
     file.data.forEach((row, rowIndex) => {
       const standardRow: StandardField = {
         studentId: `${file.id}:${rowIndex}`,
+        programomrade: file.programomrade || undefined,
         fjerdearsElev: false,
         navn: null,
         klasse: null,
@@ -347,6 +358,7 @@ export const mergeFiles = (
 
         if (
           standardField === 'studentId'
+          || standardField === 'programomrade'
           || standardField === 'fjerdearsElev'
           || standardField === 'removedFromElevlist'
           || standardField === 'removedAssignmentsSnapshot'
@@ -357,7 +369,7 @@ export const mergeFiles = (
         standardRow[
           standardField as Exclude<
             keyof StandardField,
-            'studentId' | 'fjerdearsElev' | 'removedFromElevlist' | 'removedAssignmentsSnapshot'
+            'studentId' | 'programomrade' | 'fjerdearsElev' | 'removedFromElevlist' | 'removedAssignmentsSnapshot'
           >
         ] = value;
       });
