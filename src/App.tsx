@@ -1735,6 +1735,7 @@ function App() {
                 <SubjectTally
                   subjects={subjects}
                   mergedData={mergedData}
+                  blokkCount={blokkCount}
                   subjectSettingsByName={subjectSettingsByName}
                   autoOpenSettingsToken={
                     subjectSettingsAutoOpenToken > subjectSettingsAutoOpenHandledToken
@@ -1779,6 +1780,7 @@ function App() {
               ) : activeDataTab === 'balancing' ? (
                 <BalanseringView
                   mergedData={mergedData}
+                  blokkCount={blokkCount}
                   subjectSettingsByName={subjectSettingsByName}
                   restrictions={classBlockRestrictions}
                   excludedSubjects={balancingExcludedSubjects}

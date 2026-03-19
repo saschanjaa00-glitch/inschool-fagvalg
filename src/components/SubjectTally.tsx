@@ -1,8 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { SubjectCount, StandardField } from '../utils/excelUtils';
-import { loadXlsx } from '../utils/excelUtils';
+import { getBlokkFields, loadXlsx } from '../utils/excelUtils';
 import {
-  BLOKK_LABELS,
   DEFAULT_MAX_PER_SUBJECT,
   getActiveTotal,
   getBlokkNumber,
@@ -23,6 +22,7 @@ export type { SubjectSettingsByName } from '../utils/subjectGroups';
 interface SubjectTallyProps {
   subjects: SubjectCount[];
   mergedData: StandardField[];
+  blokkCount: number;
   subjectSettingsByName: SubjectSettingsByName;
   autoOpenSettingsToken?: number;
   onAutoOpenSettingsHandled?: (token: number) => void;
@@ -170,6 +170,7 @@ const parseMathOptionsFromBlokkMat = (value: string | null): Set<MathOptionKey> 
 export const SubjectTally = ({
   subjects,
   mergedData,
+  blokkCount,
   subjectSettingsByName,
   autoOpenSettingsToken,
   onAutoOpenSettingsHandled,
@@ -192,6 +193,11 @@ export const SubjectTally = ({
   const [expandedForeignOption, setExpandedForeignOption] = useState<string | null>(null);
   const [showMath, setShowMath] = useState(false);
 
+  const activeBlokklabels = useMemo(
+    () => Array.from({ length: Math.max(1, Math.min(8, blokkCount)) }, (_, i) => `Blokk ${i + 1}` as BlokkLabel),
+    [blokkCount]
+  );
+
   const subjectStatsByKey = useMemo(() => {
     const stats = new Map<
       string,
@@ -204,20 +210,13 @@ export const SubjectTally = ({
     const ensureStats = (subject: string) => {
       const key = normalizeSubjectKey(subject);
       if (!stats.has(key)) {
-        stats.set(key, {
-          breakdown: {
-            'Blokk 1': 0,
-            'Blokk 2': 0,
-            'Blokk 3': 0,
-            'Blokk 4': 0,
-          },
-          idsByBlokk: {
-            'Blokk 1': [],
-            'Blokk 2': [],
-            'Blokk 3': [],
-            'Blokk 4': [],
-          },
-        });
+        const breakdown: Record<BlokkLabel, number> = Object.fromEntries(
+          activeBlokklabels.map((b) => [b, 0])
+        );
+        const idsByBlokk: StudentIdsByBlokk = Object.fromEntries(
+          activeBlokklabels.map((b) => [b, []])
+        );
+        stats.set(key, { breakdown, idsByBlokk });
       }
 
       return stats.get(key)!;
@@ -233,12 +232,11 @@ export const SubjectTally = ({
     mergedData.forEach((student, index) => {
       const studentId = getStudentId(student, index);
 
-      const subjectByBlokk: Array<{ label: BlokkLabel; value: string | null }> = [
-        { label: 'Blokk 1', value: student.blokk1 },
-        { label: 'Blokk 2', value: student.blokk2 },
-        { label: 'Blokk 3', value: student.blokk3 },
-        { label: 'Blokk 4', value: student.blokk4 },
-      ];
+      const subjectByBlokk: Array<{ label: BlokkLabel; value: string | null }> = 
+        getBlokkFields(blokkCount).map((field, i) => ({
+          label: `Blokk ${i + 1}` as BlokkLabel,
+          value: (student as unknown as Record<string, string | null>)[field] ?? null,
+        }));
 
       subjectByBlokk.forEach(({ label, value }) => {
         parseSubjects(value).forEach((subject) => {
@@ -260,54 +258,35 @@ export const SubjectTally = ({
     });
 
     return stats;
-  }, [mergedData, subjectSettingsByName, subjects, showMath]);
+  }, [mergedData, subjectSettingsByName, subjects, showMath, activeBlokklabels, blokkCount]);
 
   const getBlokkBreakdown = (subject: string): Record<BlokkLabel, number> => {
     const entry = subjectStatsByKey.get(normalizeSubjectKey(subject));
     if (!entry) {
-      return {
-        'Blokk 1': 0,
-        'Blokk 2': 0,
-        'Blokk 3': 0,
-        'Blokk 4': 0,
-      };
+      return Object.fromEntries(activeBlokklabels.map((b) => [b, 0]));
     }
-
-    return {
-      'Blokk 1': entry.breakdown['Blokk 1'],
-      'Blokk 2': entry.breakdown['Blokk 2'],
-      'Blokk 3': entry.breakdown['Blokk 3'],
-      'Blokk 4': entry.breakdown['Blokk 4'],
-    };
+    return { ...entry.breakdown };
   };
 
   const getStudentIdsByBlokk = (subject: string): StudentIdsByBlokk => {
     const entry = subjectStatsByKey.get(normalizeSubjectKey(subject));
     if (!entry) {
-      return {
-        'Blokk 1': [],
-        'Blokk 2': [],
-        'Blokk 3': [],
-        'Blokk 4': [],
-      };
+      return Object.fromEntries(activeBlokklabels.map((b) => [b, []]));
     }
-
-    return {
-      'Blokk 1': [...entry.idsByBlokk['Blokk 1']],
-      'Blokk 2': [...entry.idsByBlokk['Blokk 2']],
-      'Blokk 3': [...entry.idsByBlokk['Blokk 3']],
-      'Blokk 4': [...entry.idsByBlokk['Blokk 4']],
-    };
-  };
+    return Object.fromEntries(
+      activeBlokklabels.map((b) => [b, [...(entry.idsByBlokk[b] ?? [])]])
+    );
+  };;
 
   const getResolvedForSubject = (subject: string, breakdown: Record<BlokkLabel, number>) => {
-    const settings = getSettingsForSubject(subjectSettingsByName, subject, breakdown);
+    const settings = getSettingsForSubject(subjectSettingsByName, subject, breakdown, activeBlokklabels);
     const groups = settings.groups || [];
     const studentIdsByBlokk = getStudentIdsByBlokk(subject);
     const groupsByTarget = getResolvedGroupsByTarget(
       groups,
       studentIdsByBlokk,
-      settings.groupStudentAssignments || {}
+      settings.groupStudentAssignments || {},
+      activeBlokklabels
     );
 
     return {
@@ -323,7 +302,7 @@ export const SubjectTally = ({
     const breakdown = getBlokkBreakdown(subject);
     const { groupsByTarget } = getResolvedForSubject(subject, breakdown);
 
-    return BLOKK_LABELS.flatMap((blokk) =>
+    return activeBlokklabels.flatMap((blokk) =>
       groupsByTarget[blokk]
         .filter(shouldShowGroup)
         .map((group) => ({
@@ -338,7 +317,7 @@ export const SubjectTally = ({
 
   const saveSubjectGroups = (subject: string, groups: SubjectGroup[], defaultMax?: number) => {
     const breakdown = getBlokkBreakdown(subject);
-    const current = getSettingsForSubject(subjectSettingsByName, subject, breakdown);
+    const current = getSettingsForSubject(subjectSettingsByName, subject, breakdown, activeBlokklabels);
 
     onSaveSubjectSettingsByName({
       ...subjectSettingsByName,
@@ -374,7 +353,7 @@ export const SubjectTally = ({
   const moveGroupToBlokk = (subject: string, groupId: string, targetBlokk: BlokkLabel) => {
     const breakdown = getBlokkBreakdown(subject);
     const { groups, groupsByTarget } = getResolvedForSubject(subject, breakdown);
-    const allResolvedGroups = BLOKK_LABELS.flatMap((blokk) => groupsByTarget[blokk]);
+    const allResolvedGroups = Object.values(groupsByTarget).flat();
     const movingGroup = allResolvedGroups.find((group) => group.id === groupId);
     const sourceBlokk = movingGroup?.blokk;
     const sourceEnabledGroups = sourceBlokk ? groupsByTarget[sourceBlokk].filter((group) => group.enabled) : [];
@@ -430,7 +409,7 @@ export const SubjectTally = ({
     const breakdown = getBlokkBreakdown(subject);
     const { groupsByTarget, groups } = getResolvedForSubject(subject, breakdown);
 
-    const allResolved = BLOKK_LABELS.flatMap((blokk) => groupsByTarget[blokk]);
+    const allResolved = Object.values(groupsByTarget).flat();
     const targetGroup = allResolved.find((group) => group.id === draggedGroupId);
 
     if (!targetGroup) {
@@ -518,10 +497,7 @@ export const SubjectTally = ({
 
       return {
         Fag: item.subject,
-        'Blokk 1': breakdown['Blokk 1'],
-        'Blokk 2': breakdown['Blokk 2'],
-        'Blokk 3': breakdown['Blokk 3'],
-        'Blokk 4': breakdown['Blokk 4'],
+        ...Object.fromEntries(activeBlokklabels.map((b) => [b, breakdown[b] ?? 0])),
         Totalt: activeTotal,
       };
     });
@@ -563,8 +539,8 @@ export const SubjectTally = ({
     doc.text(new Date().toLocaleString('nb-NO'), pageWidth - margin, margin, { align: 'right' });
 
     const pdfRows = subjectRows.map((row) => {
-      const blockGroups = BLOKK_LABELS.reduce((acc, blokkLabel) => {
-        acc[blokkLabel] = row.groupsByTarget[blokkLabel]
+      const blockGroups = activeBlokklabels.reduce((acc, blokkLabel) => {
+        acc[blokkLabel] = (row.groupsByTarget[blokkLabel] ?? [])
           .filter(shouldShowGroup)
           .map((entry) => ({
             count: entry.allocatedCount,
@@ -576,16 +552,16 @@ export const SubjectTally = ({
 
       const lineCount = Math.max(
         1,
-        ...BLOKK_LABELS.map((blokkLabel) => getPdfGroupRowCount(blockGroups[blokkLabel].length))
+        ...activeBlokklabels.map((blokkLabel) => getPdfGroupRowCount(blockGroups[blokkLabel].length))
       );
       const spacer = Array.from({ length: lineCount }, () => ' ').join('\n');
+      const blokkDataKeys = Object.fromEntries(
+        activeBlokklabels.map((_, i) => [`blokk${i + 1}`, spacer])
+      );
 
       return {
         subject: row.item.subject,
-        blokk1: spacer,
-        blokk2: spacer,
-        blokk3: spacer,
-        blokk4: spacer,
+        ...blokkDataKeys,
         total: String(row.activeTotal),
         blockGroups,
       };
@@ -611,26 +587,19 @@ export const SubjectTally = ({
       },
       columnStyles: {
         subject: { cellWidth: 190, halign: 'left' },
-        blokk1: { cellWidth: 120, halign: 'center' },
-        blokk2: { cellWidth: 120, halign: 'center' },
-        blokk3: { cellWidth: 120, halign: 'center' },
-        blokk4: { cellWidth: 120, halign: 'center' },
+        ...Object.fromEntries(
+          activeBlokklabels.map((_, i) => [`blokk${i + 1}`, { cellWidth: 120, halign: 'center' }])
+        ),
         total: { cellWidth: 65, halign: 'center', fontStyle: 'bold' },
       },
       columns: [
         { header: 'Fag', dataKey: 'subject' },
-        { header: 'Blokk 1', dataKey: 'blokk1' },
-        { header: 'Blokk 2', dataKey: 'blokk2' },
-        { header: 'Blokk 3', dataKey: 'blokk3' },
-        { header: 'Blokk 4', dataKey: 'blokk4' },
+        ...activeBlokklabels.map((b, i) => ({ header: b, dataKey: `blokk${i + 1}` })),
         { header: 'Totalt', dataKey: 'total' },
       ],
       body: pdfRows.map((row) => [
         row.subject,
-        row.blokk1,
-        row.blokk2,
-        row.blokk3,
-        row.blokk4,
+        ...activeBlokklabels.map((_, i) => (row as Record<string, unknown>)[`blokk${i + 1}`] ?? ''),
         row.total,
       ]),
       didDrawCell: (data) => {
@@ -639,9 +608,10 @@ export const SubjectTally = ({
         }
 
         const dataKey = String(data.column.dataKey);
-        const blokkLabel = (`Blokk ${dataKey.slice(-1)}`) as BlokkLabel;
+        const blokkIndex = activeBlokklabels.findIndex((_, i) => `blokk${i + 1}` === dataKey);
+        const blokkLabel = blokkIndex >= 0 ? activeBlokklabels[blokkIndex] : null;
 
-        if (!['blokk1', 'blokk2', 'blokk3', 'blokk4'].includes(dataKey)) {
+        if (blokkLabel === null) {
           return;
         }
 
@@ -763,7 +733,6 @@ export const SubjectTally = ({
   const exportStudentList = async (subject: string) => {
     const XLSX = await loadXlsx();
 
-    const BLOKK_LABELS_ORDERED: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'];
     const studentIdsByBlokk = getStudentIdsByBlokk(subject);
     const studentById = new Map<string, StandardField>();
     mergedData.forEach((student, index) => {
@@ -771,8 +740,8 @@ export const SubjectTally = ({
     });
 
     const rows: { Fag: string; Blokk: string; Navn: string }[] = [];
-    BLOKK_LABELS_ORDERED.forEach((blokkLabel) => {
-      const ids = studentIdsByBlokk[blokkLabel];
+    activeBlokklabels.forEach((blokkLabel) => {
+      const ids = studentIdsByBlokk[blokkLabel] ?? [];
       const names = ids
         .map((id) => studentById.get(id)?.navn || '')
         .filter(Boolean)
@@ -889,7 +858,7 @@ export const SubjectTally = ({
 
     subjects.forEach((item) => {
       const breakdown = getBlokkBreakdown(item.subject);
-      const saved = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown);
+      const saved = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown, activeBlokklabels);
       const slots = getGroupSlotsForSubject(item.subject);
       const groupMaxBySlotKey = Object.fromEntries(
         slots
@@ -954,7 +923,7 @@ export const SubjectTally = ({
       }
 
       const breakdown = getBlokkBreakdown(item.subject);
-      const current = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown);
+      const current = getSettingsForSubject(subjectSettingsByName, item.subject, breakdown, activeBlokklabels);
       const defaultMax = sanitizeCount(draft.defaultMax);
       const slotByGroupId = new Map<string, string>(
         getGroupSlotsForSubject(item.subject).map((slot) => [slot.groupId, slot.slotKey])
@@ -1008,7 +977,7 @@ export const SubjectTally = ({
       .map((key) => {
         const displayName = MATH_OPTION_DISPLAY[key];
         const breakdown = getBlokkBreakdown(displayName);
-        const totalStudents = BLOKK_LABELS.reduce((s, b) => s + breakdown[b], 0);
+        const totalStudents = activeBlokklabels.reduce((s, b) => s + (breakdown[b] ?? 0), 0);
         if (totalStudents === 0) return null;
         const resolved = getResolvedForSubject(displayName, breakdown);
         return { item: { subject: displayName, count: totalStudents }, breakdown, isMathOption: true, ...resolved };
@@ -1017,7 +986,7 @@ export const SubjectTally = ({
 
     return [...subjectRows, ...mathRows]
       .sort((a, b) => a.item.subject.localeCompare(b.item.subject, 'nb', { sensitivity: 'base' }));
-  }, [subjectRows, showMath, subjectStatsByKey]);
+  }, [subjectRows, showMath, subjectStatsByKey, activeBlokklabels]);
 
   if (subjects.length === 0) {
     return <div className={styles.empty}>Ingen fag funnet</div>;
@@ -1060,10 +1029,7 @@ export const SubjectTally = ({
         <thead>
           <tr>
             <th>Fag</th>
-            <th>Blokk 1</th>
-            <th>Blokk 2</th>
-            <th>Blokk 3</th>
-            <th>Blokk 4</th>
+            {activeBlokklabels.map((b) => <th key={b}>{b}</th>)}
             {showMath && <th>Matte</th>}
             <th>Totalt</th>
             <th>Handlinger</th>
@@ -1155,7 +1121,7 @@ export const SubjectTally = ({
             return (
               <tr key={row.item.subject} className={styles.subjectRow}>
                 <td className={styles.subjectNameCell}>{row.item.subject}</td>
-                {BLOKK_LABELS.map((targetBlokk) => {
+                {activeBlokklabels.map((targetBlokk) => {
                   if (showMath && row.isMathOption && targetBlokk === 'Blokk 1') {
                     return renderGroupCell(targetBlokk, targetBlokk, undefined, {
                       entryFilter: (entry) => entry.sourceBlokk !== 'Blokk 1',

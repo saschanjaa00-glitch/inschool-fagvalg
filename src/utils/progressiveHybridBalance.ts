@@ -5,8 +5,8 @@ export type BlockNumber = 1 | 2 | 3 | 4;
 
 export interface SubjectGroupLike {
   id: string;
-  blokk: `Blokk ${BlockNumber}`;
-  sourceBlokk: `Blokk ${BlockNumber}`;
+  blokk: string;
+  sourceBlokk: string;
   enabled: boolean;
   max: number;
   createdAt: string;
@@ -123,6 +123,7 @@ export interface BalancingConfig {
   classBlockRestrictions: ClassBlockRestrictions;
   excludedSubjects: string[];
   lockedAssignmentKeys: string[];
+  blockCount?: number;
 }
 
 interface InternalState {
@@ -231,10 +232,10 @@ const parseSubjects = (value: string | null): string[] => {
     .filter((part) => part.length > 0);
 };
 
-type BlokkKey = `blokk${BlockNumber}`;
+type BlokkKey = string;
 
-const getBlokkKey = (block: BlockNumber): BlokkKey => {
-  return `blokk${block}` as BlokkKey;
+const getBlokkKey = (block: number): BlokkKey => {
+  return `blokk${block}`;
 };
 
 const normalizeSubject = (value: string): string => value.trim().toLocaleLowerCase('nb');
@@ -289,7 +290,7 @@ const inferClassLevels = (classGroup: string, isFourthYear: boolean): string[] =
   return [];
 };
 
-const blockFromLabel = (label: `Blokk ${BlockNumber}`): BlockNumber => {
+const blockFromLabel = (label: string): BlockNumber => {
   return Number.parseInt(label.replace('Blokk ', ''), 10) as BlockNumber;
 };
 
@@ -459,7 +460,8 @@ const groupCodeByIndex = (block: BlockNumber, index: number): string => `${block
 const ensureSubjectGroups = (
   subjectName: string,
   subjectSettingsByName: SubjectSettingsByNameLike,
-  occupancyByBlock: Record<BlockNumber, number>
+  occupancyByBlock: Record<number, number>,
+  blockNumbers: BlockNumber[] = [1, 2, 3, 4]
 ): SubjectGroupLike[] => {
   const raw = subjectSettingsByName[subjectName];
   const defaultMax = raw?.defaultMax ?? 30;
@@ -469,7 +471,7 @@ const ensureSubjectGroups = (
   }
 
   const autoGroups: SubjectGroupLike[] = [];
-  ([1, 2, 3, 4] as BlockNumber[]).forEach((block) => {
+  blockNumbers.forEach((block) => {
     if (occupancyByBlock[block] > 0) {
       autoGroups.push({
         id: `auto-${mapSubjectToCode(subjectName)}-${block}-1`,
@@ -505,7 +507,11 @@ export const buildState = (
   };
 
   const students = new Map<string, StudentNode>();
-  const occupancyBySubject = new Map<string, Record<BlockNumber, number>>();
+  const occupancyBySubject = new Map<string, Record<number, number>>();
+  const blockNumbers = Array.from(
+    { length: Math.max(1, Math.min(8, mergedConfig.blockCount ?? 4)) },
+    (_, i) => (i + 1) as BlockNumber
+  );
 
   rows.forEach((row, index) => {
     const studentId = inferStudentId(row, index);
@@ -515,12 +521,12 @@ export const buildState = (
 
     const assignments: AssignmentNode[] = [];
 
-    ([1, 2, 3, 4] as BlockNumber[]).forEach((block) => {
-      const subjectsInBlock = parseSubjects(row[getBlokkKey(block)] as string | null);
+    blockNumbers.forEach((block) => {
+      const subjectsInBlock = parseSubjects(row[getBlokkKey(block) as keyof StandardField] as string | null);
 
       subjectsInBlock.forEach((subjectName) => {
         const normalized = normalizeSubject(subjectName);
-        const existing = occupancyBySubject.get(normalized) || { 1: 0, 2: 0, 3: 0, 4: 0 };
+        const existing = occupancyBySubject.get(normalized) || {};
         existing[block] = (existing[block] || 0) + 1;
         occupancyBySubject.set(normalized, existing);
 
@@ -557,11 +563,18 @@ export const buildState = (
   });
 
   subjectNameLookup.forEach((subjectName, subjectCode) => {
-    const occupancy = occupancyBySubject.get(normalizeSubject(subjectName)) || { 1: 0, 2: 0, 3: 0, 4: 0 };
-    const sourceGroups = ensureSubjectGroups(subjectName, subjectSettingsByName, occupancy);
+    const occupancy = occupancyBySubject.get(normalizeSubject(subjectName)) || {};
+    const sourceGroups = ensureSubjectGroups(subjectName, subjectSettingsByName, occupancy, blockNumbers);
 
-    const indexedByBlock = new Map<BlockNumber, SubjectGroupLike[]>();
-    ([1, 2, 3, 4] as BlockNumber[]).forEach((block) => indexedByBlock.set(block, []));
+    const indexedByBlock = new Map<number, SubjectGroupLike[]>();
+    blockNumbers.forEach((block) => indexedByBlock.set(block, []));
+    // Also index any blocks that exist in the groups but are outside blockNumbers
+    sourceGroups.forEach((group) => {
+      const block = blockFromLabel(group.blokk);
+      if (!indexedByBlock.has(block)) {
+        indexedByBlock.set(block, []);
+      }
+    });
 
     sourceGroups.forEach((group) => {
       if (!group.enabled) {
@@ -573,10 +586,11 @@ export const buildState = (
 
     const builtGroups: GroupNode[] = [];
 
-    ([1, 2, 3, 4] as BlockNumber[]).forEach((block) => {
+    Array.from(indexedByBlock.keys()).sort((a, b) => a - b).forEach((block) => {
+      const blockNum = block as BlockNumber;
       const blockGroups = sortGroupsStable(indexedByBlock.get(block) || []);
       blockGroups.forEach((group, index) => {
-        const groupCode = groupCodeByIndex(block, index);
+        const groupCode = groupCodeByIndex(blockNum, index);
         const key = `${subjectCode}|${groupCode}|${block}`;
         const node: GroupNode = {
           key,
@@ -584,7 +598,7 @@ export const buildState = (
           subjectName,
           groupCode,
           groupId: group.id,
-          block,
+          block: blockNum,
           capacity: Math.max(0, Math.floor(group.max)),
           size: 0,
           studentIds: new Set<string>(),
@@ -1925,12 +1939,12 @@ const applyMovesToRows = (rows: StandardField[], moves: MoveRecord[]): StandardF
       return;
     }
 
-    const row = nextRows[rowIndex];
+    const row = nextRows[rowIndex] as unknown as Record<string, string | null>;
     const fromKey = getBlokkKey(move.fromBlock);
     const toKey = getBlokkKey(move.toBlock);
 
-    const fromSubjects = parseSubjects(row[fromKey] as string | null);
-    const toSubjects = parseSubjects(row[toKey] as string | null);
+    const fromSubjects = parseSubjects(row[fromKey]);
+    const toSubjects = parseSubjects(row[toKey]);
 
     const keepFrom = fromSubjects.filter((value) => normalizeSubject(value) !== normalizeSubject(move.subjectName));
     const hasInTo = toSubjects.some((value) => normalizeSubject(value) === normalizeSubject(move.subjectName));

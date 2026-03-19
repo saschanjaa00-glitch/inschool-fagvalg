@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StandardField } from '../utils/excelUtils';
+import { getBlokkFields } from '../utils/excelUtils';
 import {
   DEFAULT_BALANCING_CONFIG,
   DEFAULT_CLASS_BLOCK_RESTRICTIONS,
@@ -16,6 +17,7 @@ import styles from './BalanseringView.module.css';
 
 interface BalanseringViewProps {
   mergedData: StandardField[];
+  blokkCount: number;
   subjectSettingsByName: SubjectSettingsByNameLike;
   restrictions: ClassBlockRestrictions;
   excludedSubjects: string[];
@@ -70,14 +72,13 @@ const inferStudentId = (row: StandardField, index: number): string => {
   return row.studentId || `${row.navn || 'ukjent'}:${row.klasse || 'ukjent'}:${index}`;
 };
 
-const ALL_BLOCKS: BlockNumber[] = [1, 2, 3, 4];
-
-const normalizeRestrictions = (input: ClassBlockRestrictions): ClassBlockRestrictions => {
+const normalizeRestrictions = (input: ClassBlockRestrictions, blockNumbers: BlockNumber[] = [1, 2, 3, 4]): ClassBlockRestrictions => {
+  const defaultBlockMap = Object.fromEntries(blockNumbers.map((b) => [b, false])) as Record<BlockNumber, boolean>;
   const next: ClassBlockRestrictions = {
-    VG1: { 1: false, 2: false, 3: false, 4: false },
-    VG2: { 1: false, 2: false, 3: false, 4: false },
-    VG3: { 1: false, 2: false, 3: false, 4: false },
-    VG4: { 1: false, 2: false, 3: false, 4: false },
+    VG1: { ...defaultBlockMap },
+    VG2: { ...defaultBlockMap },
+    VG3: { ...defaultBlockMap },
+    VG4: { ...defaultBlockMap },
   };
 
   Object.entries(DEFAULT_CLASS_BLOCK_RESTRICTIONS).forEach(([classKey, map]) => {
@@ -134,6 +135,7 @@ const EVEN_BALANCE_OFFSETS: number[] = [20, 15, 10, 8, 6, 4, 2, 0];
 
 export const BalanseringView = ({
   mergedData,
+  blokkCount,
   subjectSettingsByName,
   restrictions,
   excludedSubjects,
@@ -163,7 +165,12 @@ export const BalanseringView = ({
   const workerRef = useRef<Worker | null>(null);
   const activeRequestIdRef = useRef(0);
 
-  const effectiveRestrictions = useMemo(() => normalizeRestrictions(restrictions), [restrictions]);
+  const blockNumbers = useMemo(
+    () => Array.from({ length: Math.max(1, Math.min(8, blokkCount)) }, (_, i) => (i + 1) as BlockNumber),
+    [blokkCount]
+  );
+
+  const effectiveRestrictions = useMemo(() => normalizeRestrictions(restrictions, blockNumbers), [restrictions, blockNumbers]);
   const visibleClassLevels = useMemo(() => {
     const levels = new Set<string>();
 
@@ -179,15 +186,16 @@ export const BalanseringView = ({
     const subjects = new Set<string>();
 
     mergedData.forEach((row) => {
-      [row.blokk1, row.blokk2, row.blokk3, row.blokk4].forEach((value) => {
-        parseSubjects(value).forEach((subject) => subjects.add(subject));
+      getBlokkFields(blokkCount).forEach((field) => {
+        parseSubjects((row as unknown as Record<string, string | null>)[field] ?? null)
+          .forEach((subject) => subjects.add(subject));
       });
     });
 
     Object.keys(subjectSettingsByName).forEach((subject) => subjects.add(subject));
 
     return Array.from(subjects).sort((left, right) => left.localeCompare(right, 'nb', { sensitivity: 'base' }));
-  }, [mergedData, subjectSettingsByName]);
+  }, [mergedData, subjectSettingsByName, blokkCount]);
 
   const studentsByClass = useMemo(() => {
     const byClass = new Map<string, Array<{ studentId: string; name: string }>>();
@@ -245,9 +253,9 @@ export const BalanseringView = ({
 
   const hasAnyAllowedRestriction = useMemo(() => {
     return visibleClassLevels.some((classKey) => {
-      return ALL_BLOCKS.some((block) => effectiveRestrictions[classKey]?.[block] ?? false);
+      return blockNumbers.some((block) => effectiveRestrictions[classKey]?.[block] ?? false);
     });
-  }, [effectiveRestrictions, visibleClassLevels]);
+  }, [effectiveRestrictions, visibleClassLevels, blockNumbers]);
 
   useEffect(() => {
     if (!hasAnyAllowedRestriction) {
@@ -352,10 +360,9 @@ export const BalanseringView = ({
       }
 
       const subjects = new Set<string>([
-        ...parseSubjects(row.blokk1),
-        ...parseSubjects(row.blokk2),
-        ...parseSubjects(row.blokk3),
-        ...parseSubjects(row.blokk4),
+        ...getBlokkFields(blokkCount).flatMap((field) =>
+          parseSubjects((row as unknown as Record<string, string | null>)[field] ?? null)
+        ),
       ]);
 
       subjects.forEach((subjectName) => {
@@ -388,6 +395,7 @@ export const BalanseringView = ({
       classBlockRestrictions: effectiveRestrictions,
       excludedSubjects,
       lockedAssignmentKeys: Array.from(lockKeys),
+      blockCount: blokkCount,
     };
 
     const requestId = activeRequestIdRef.current + 1;
@@ -421,7 +429,8 @@ export const BalanseringView = ({
   };
 
   const updateStudentRestriction = (studentId: string, block: BlockNumber, allowed: boolean) => {
-    const base = effectiveRestrictions[studentId] || effectiveRestrictions['VG4'] || { 1: false, 2: false, 3: false, 4: false };
+    const defaultBlockMap = Object.fromEntries(blockNumbers.map((b) => [b, false])) as Record<BlockNumber, boolean>;
+    const base = effectiveRestrictions[studentId] || effectiveRestrictions['VG4'] || defaultBlockMap;
     const next = {
       ...effectiveRestrictions,
       [studentId]: {
@@ -440,7 +449,7 @@ export const BalanseringView = ({
 
   const allowAll = () => {
     const next = visibleClassLevels.reduce<ClassBlockRestrictions>((acc, classKey) => {
-      acc[classKey] = { 1: true, 2: true, 3: true, 4: true };
+      acc[classKey] = Object.fromEntries(blockNumbers.map((b) => [b, true])) as Record<BlockNumber, boolean>;
       return acc;
     }, {});
 
@@ -559,10 +568,7 @@ export const BalanseringView = ({
             <thead>
               <tr>
                 <th>Trinn</th>
-                <th>Blokk 1</th>
-                <th>Blokk 2</th>
-                <th>Blokk 3</th>
-                <th>Blokk 4</th>
+                {blockNumbers.map((b) => <th key={b}>Blokk {b}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -581,7 +587,7 @@ export const BalanseringView = ({
                           VG4 (Fjerdeårs-elev)
                         </button>
                       </td>
-                      {([1, 2, 3, 4] as BlockNumber[]).map((block) => {
+                      {blockNumbers.map((block) => {
                         const allowed = effectiveRestrictions['VG4']?.[block] ?? false;
                         return (
                           <td key={`VG4-${block}`}>
@@ -601,7 +607,7 @@ export const BalanseringView = ({
                 return (
                   <tr key={classKey}>
                     <td>{classKey}</td>
-                    {([1, 2, 3, 4] as BlockNumber[]).map((block) => {
+                    {blockNumbers.map((block) => {
                       const allowed = effectiveRestrictions[classKey]?.[block] ?? false;
                       return (
                         <td key={`${classKey}-${block}`}>
@@ -645,7 +651,7 @@ export const BalanseringView = ({
                         )}
                       </div>
                     </td>
-                    {([1, 2, 3, 4] as BlockNumber[]).map((block) => {
+                    {blockNumbers.map((block) => {
                       const allowed = getBlockAllowed(block);
                       return (
                         <td key={`${studentId}-${block}`}>

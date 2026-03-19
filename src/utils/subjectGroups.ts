@@ -1,4 +1,4 @@
-export type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
+export type BlokkLabel = string;
 
 export interface SubjectGroup {
   id: string;
@@ -28,7 +28,7 @@ export interface ResolvedGroup extends SubjectGroup {
   overfilled: boolean;
 }
 
-export type StudentIdsByBlokk = Record<BlokkLabel, string[]>;
+export type StudentIdsByBlokk = Record<string, string[]>;
 
 export const DEFAULT_MAX_PER_SUBJECT = 30;
 export const BLOKK_LABELS: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'];
@@ -38,10 +38,10 @@ const buildDefaultSettings = (): SubjectSettings => ({
   groups: [],
 });
 
-const normalizeOrder = (order?: BlokkLabel[]): BlokkLabel[] => {
-  return BLOKK_LABELS.map((label, index) => {
+const normalizeOrder = (order?: BlokkLabel[], activeBlokklabels: BlokkLabel[] = BLOKK_LABELS): BlokkLabel[] => {
+  return activeBlokklabels.map((label, index) => {
     const candidate = order?.[index];
-    return candidate && BLOKK_LABELS.includes(candidate) ? candidate : label;
+    return candidate && activeBlokklabels.includes(candidate) ? candidate : label;
   });
 };
 
@@ -84,7 +84,7 @@ const sanitizeGroups = (groups: SubjectGroup[] | undefined, defaultMax: number):
   const seenIds = new Set<string>();
 
   return groups
-    .filter((group) => BLOKK_LABELS.includes(group.blokk))
+    .filter((group) => typeof group.blokk === 'string' && group.blokk.trim().length > 0)
     .map((group) => {
       const id = group.id && !seenIds.has(group.id) ? group.id : makeGroupId();
       seenIds.add(id);
@@ -92,8 +92,8 @@ const sanitizeGroups = (groups: SubjectGroup[] | undefined, defaultMax: number):
       return {
         id,
         blokk: group.blokk,
-        sourceBlokk: BLOKK_LABELS.includes(group.sourceBlokk as BlokkLabel)
-          ? (group.sourceBlokk as BlokkLabel)
+        sourceBlokk: typeof group.sourceBlokk === 'string' && group.sourceBlokk.trim().length > 0
+          ? group.sourceBlokk
           : group.blokk,
         enabled: group.enabled !== false,
         max: sanitizeCount(group.max, defaultMax),
@@ -109,12 +109,13 @@ export const getBlokkNumber = (label: BlokkLabel): number => {
 const buildLegacyGroups = (
   raw: SubjectSettings,
   defaultMax: number,
-  blokkBreakdown: Record<BlokkLabel, number>
+  blokkBreakdown: Record<BlokkLabel, number>,
+  activeBlokklabels: BlokkLabel[] = BLOKK_LABELS
 ): SubjectGroup[] => {
   const groups: SubjectGroup[] = [];
-  const placement = normalizeOrder(raw.blokkOrder);
+  const placement = normalizeOrder(raw.blokkOrder, activeBlokklabels);
 
-  BLOKK_LABELS.forEach((sourceBlokk, sourceIndex) => {
+  activeBlokklabels.forEach((sourceBlokk, sourceIndex) => {
     const targetBlokk = placement[sourceIndex] ?? sourceBlokk;
     const hasImportData = blokkBreakdown[sourceBlokk] > 0;
     const explicitEnabled = raw.blokkEnabled?.[sourceBlokk];
@@ -129,7 +130,7 @@ const buildLegacyGroups = (
     groups.push(makeGroup(targetBlokk, sourceBlokk, max, enabled));
   });
 
-  BLOKK_LABELS.forEach((targetBlokk) => {
+  activeBlokklabels.forEach((targetBlokk) => {
     const extras = Math.max(0, Math.floor(raw.extraGroupCounts?.[targetBlokk] ?? 0));
     for (let i = 0; i < extras; i += 1) {
       const max = sanitizeCount(raw.blokkMaxOverrides?.[targetBlokk], defaultMax);
@@ -142,11 +143,12 @@ const buildLegacyGroups = (
 
 const buildImportGroups = (
   defaultMax: number,
-  blokkBreakdown: Record<BlokkLabel, number>
+  blokkBreakdown: Record<BlokkLabel, number>,
+  activeBlokklabels: BlokkLabel[] = BLOKK_LABELS
 ): SubjectGroup[] => {
   const groups: SubjectGroup[] = [];
 
-  BLOKK_LABELS.forEach((blokk) => {
+  activeBlokklabels.forEach((blokk) => {
     if (blokkBreakdown[blokk] > 0) {
       groups.push(makeGroup(blokk, blokk, defaultMax, true));
     }
@@ -158,7 +160,8 @@ const buildImportGroups = (
 export const getSettingsForSubject = (
   subjectSettingsByName: SubjectSettingsByName,
   subject: string,
-  blokkBreakdown: Record<BlokkLabel, number>
+  blokkBreakdown: Record<BlokkLabel, number>,
+  activeBlokklabels: BlokkLabel[] = BLOKK_LABELS
 ): SubjectSettings => {
   const raw = subjectSettingsByName[subject];
 
@@ -167,7 +170,7 @@ export const getSettingsForSubject = (
     return {
       ...defaults,
       groupStudentAssignments: {},
-      groups: buildImportGroups(defaults.defaultMax, blokkBreakdown),
+      groups: buildImportGroups(defaults.defaultMax, blokkBreakdown, activeBlokklabels),
     };
   }
 
@@ -195,14 +198,14 @@ export const getSettingsForSubject = (
     return {
       defaultMax,
       groupStudentAssignments,
-      groups: buildImportGroups(defaultMax, blokkBreakdown),
+      groups: buildImportGroups(defaultMax, blokkBreakdown, activeBlokklabels),
     };
   }
 
   return {
     defaultMax,
     groupStudentAssignments,
-    groups: buildLegacyGroups(raw, defaultMax, blokkBreakdown),
+    groups: buildLegacyGroups(raw, defaultMax, blokkBreakdown, activeBlokklabels),
   };
 };
 
@@ -213,27 +216,28 @@ export const shouldShowGroup = (group: ResolvedGroup): boolean => {
 export const getResolvedGroupsByTarget = (
   groups: SubjectGroup[],
   blokkStudentIds: StudentIdsByBlokk,
-  groupStudentAssignments: Record<string, string>
+  groupStudentAssignments: Record<string, string>,
+  activeBlokklabels: BlokkLabel[] = BLOKK_LABELS
 ): Record<BlokkLabel, ResolvedGroup[]> => {
-  const byTarget: Record<BlokkLabel, SubjectGroup[]> = {
-    'Blokk 1': [],
-    'Blokk 2': [],
-    'Blokk 3': [],
-    'Blokk 4': [],
-  };
+  const byTarget: Record<BlokkLabel, SubjectGroup[]> = Object.fromEntries(
+    activeBlokklabels.map((b) => [b, []])
+  );
+  // also collect any groups in blokks outside activeBlokklabels
+  groups.forEach((group) => {
+    if (!Object.prototype.hasOwnProperty.call(byTarget, group.blokk)) {
+      byTarget[group.blokk] = [];
+    }
+  });
 
   groups.forEach((group) => {
     byTarget[group.blokk].push(group);
   });
 
-  const resolvedByTarget: Record<BlokkLabel, ResolvedGroup[]> = {
-    'Blokk 1': [],
-    'Blokk 2': [],
-    'Blokk 3': [],
-    'Blokk 4': [],
-  };
+  const resolvedByTarget: Record<BlokkLabel, ResolvedGroup[]> = Object.fromEntries(
+    Object.keys(byTarget).map((b) => [b, []])
+  );
 
-  BLOKK_LABELS.forEach((blokk) => {
+  Object.keys(byTarget).forEach((blokk) => {
     const sorted = [...byTarget[blokk]].sort((left, right) => {
       if (left.createdAt !== right.createdAt) {
         return left.createdAt.localeCompare(right.createdAt);
@@ -295,8 +299,8 @@ export const getResolvedGroupsByTarget = (
 };
 
 export const getActiveTotal = (groupsByTarget: Record<BlokkLabel, ResolvedGroup[]>): number => {
-  return BLOKK_LABELS.reduce((sum, blokk) => {
-    const activeCount = groupsByTarget[blokk]
+  return Object.values(groupsByTarget).reduce((sum, groups) => {
+    const activeCount = groups
       .filter((group) => group.enabled)
       .reduce((groupSum, group) => groupSum + group.allocatedCount, 0);
     return sum + activeCount;
