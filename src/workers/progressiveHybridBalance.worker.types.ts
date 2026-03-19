@@ -1,9 +1,12 @@
 import type { StandardField } from '../utils/excelUtils';
 import type {
   BalancingConfig,
+  BalancingProgress,
   ProgressiveHybridBalanceResult,
   SubjectSettingsByNameLike,
 } from '../utils/progressiveHybridBalance';
+
+export type { BalancingProgress };
 
 export interface BalancingWorkerRunPayload {
   rows: StandardField[];
@@ -29,5 +32,11 @@ export interface BalancingWorkerErrorResponse {
   message: string;
 }
 
+export interface BalancingWorkerProgressResponse {
+  type: 'progress';
+  requestId: number;
+  progress: BalancingProgress;
+}
+
 export type BalancingWorkerInbound = BalancingWorkerRunRequest;
-export type BalancingWorkerOutbound = BalancingWorkerSuccessResponse | BalancingWorkerErrorResponse;
+export type BalancingWorkerOutbound = BalancingWorkerSuccessResponse | BalancingWorkerErrorResponse | BalancingWorkerProgressResponse;

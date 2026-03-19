@@ -35,6 +35,44 @@
   font-size: 13px;
 }
 
+.overlayStats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin: 14px 0 6px;
+}
+
+.overlayStat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 54px;
+}
+
+.overlayStatValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #133e6f;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlayStatLabel {
+  font-size: 10px;
+  color: #7a94ab;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+
+.overlayPhase {
+  margin: 8px 0 0;
+  color: #4b6079;
+  font-size: 12px;
+  font-style: italic;
+  min-height: 16px;
+}
+
 .juggleTrack {
   position: relative;
   height: 44px;

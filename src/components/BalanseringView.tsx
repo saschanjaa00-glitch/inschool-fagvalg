@@ -12,7 +12,7 @@ import {
   type SubjectSettingsByNameLike,
 } from '../utils/progressiveHybridBalance';
 import { mapSubjectToCode } from '../utils/subjectCodeMapping';
-import type { BalancingWorkerInbound, BalancingWorkerOutbound } from '../workers/progressiveHybridBalance.worker.types';
+import type { BalancingWorkerInbound, BalancingWorkerOutbound, BalancingProgress } from '../workers/progressiveHybridBalance.worker.types';
 import styles from './BalanseringView.module.css';
 
 interface BalanseringViewProps {
@@ -162,8 +162,19 @@ export const BalanseringView = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [lastResult, setLastResult] = useState<ProgressiveHybridBalanceResult | null>(null);
   const [isBalancing, setIsBalancing] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [balancingProgress, setBalancingProgress] = useState<BalancingProgress | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const activeRequestIdRef = useRef(0);
+  const balancingStartTimeRef = useRef(0);
+
+  useEffect(() => {
+    if (!isBalancing) return;
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - balancingStartTimeRef.current) / 1000));
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isBalancing]);
 
   const blockNumbers = useMemo(
     () => Array.from({ length: Math.max(1, Math.min(8, blokkCount)) }, (_, i) => (i + 1) as BlockNumber),
@@ -274,6 +285,11 @@ export const BalanseringView = ({
     const handleMessage = (event: MessageEvent<BalancingWorkerOutbound>) => {
       const message = event.data;
       if (!message || message.requestId !== activeRequestIdRef.current) {
+        return;
+      }
+
+      if (message.type === 'progress') {
+        setBalancingProgress(message.progress);
         return;
       }
 
@@ -400,6 +416,9 @@ export const BalanseringView = ({
 
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
+    balancingStartTimeRef.current = Date.now();
+    setElapsedSeconds(0);
+    setBalancingProgress(null);
     setIsBalancing(true);
     setStatusMessage('Balanserer...');
 
@@ -544,7 +563,31 @@ export const BalanseringView = ({
               <span className={`${styles.juggleBall} ${styles.juggleBallTwo}`.trim()} />
               <span className={`${styles.juggleBall} ${styles.juggleBallThree}`.trim()} />
             </div>
-            <p>Jobber med fordeling av elever i grupper.</p>
+            <div className={styles.overlayStats}>
+              <div className={styles.overlayStat}>
+                <span className={styles.overlayStatValue}>
+                  {Math.floor(elapsedSeconds / 60) > 0
+                    ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`
+                    : `${elapsedSeconds}s`}
+                </span>
+                <span className={styles.overlayStatLabel}>Tid</span>
+              </div>
+              <div className={styles.overlayStat}>
+                <span className={styles.overlayStatValue}>{balancingProgress?.movesApplied ?? 0}</span>
+                <span className={styles.overlayStatLabel}>Flytt</span>
+              </div>
+              {(balancingProgress?.totalPasses ?? 0) > 0 && (
+                <div className={styles.overlayStat}>
+                  <span className={styles.overlayStatValue}>
+                    {balancingProgress!.pass} / {balancingProgress!.totalPasses}
+                  </span>
+                  <span className={styles.overlayStatLabel}>Runder</span>
+                </div>
+              )}
+            </div>
+            {balancingProgress?.phase && (
+              <p className={styles.overlayPhase}>{balancingProgress.phase}</p>
+            )}
           </div>
         </div>
       )}

@@ -79,6 +79,13 @@ export interface SubjectMetrics {
   imbalance: number;
 }
 
+export interface BalancingProgress {
+  phase: string;
+  movesApplied: number;
+  pass: number;
+  totalPasses: number;
+}
+
 export interface BalanceDiagnostics {
   beforeScore: ScoreBreakdown;
   afterScore: ScoreBreakdown;
@@ -2106,7 +2113,8 @@ const mergeConfig = (config?: Partial<BalancingConfig>): BalancingConfig => {
 export const progressiveHybridBalance = (
   rows: StandardField[],
   subjectSettingsByName: SubjectSettingsByNameLike,
-  config?: Partial<BalancingConfig>
+  config?: Partial<BalancingConfig>,
+  onProgress?: (progress: BalancingProgress) => void
 ): ProgressiveHybridBalanceResult => {
   const mergedConfig = mergeConfig(config);
   const excludedSubjects = toExcludedSubjectSet(mergedConfig.excludedSubjects);
@@ -2127,9 +2135,13 @@ export const progressiveHybridBalance = (
   let lookaheadRollback = 0;
 
   const capacityOffsets = normalizeCapacityOffsets(mergedConfig.capacityOffsets, mergedConfig.maxRelaxation);
+  const totalPasses = capacityOffsets.length;
+
+  onProgress?.({ phase: 'Reparerer kollisjoner...', movesApplied: state.history.length, pass: 0, totalPasses });
 
   for (const offset of capacityOffsets) {
     passesRun += 1;
+    onProgress?.({ phase: `Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`, movesApplied: state.history.length, pass: passesRun, totalPasses });
     repairOvercapacity(state, mergedConfig, offset);
     let improving = true;
     let flowIterations = 0;
@@ -2152,6 +2164,8 @@ export const progressiveHybridBalance = (
     lookaheadAttempts += local.lookaheadAttempts;
     lookaheadSuccess += local.lookaheadSuccess;
     lookaheadRollback += local.lookaheadRollback;
+
+    onProgress?.({ phase: `Runde ${passesRun} ferdig — ${state.history.length} flytt totalt`, movesApplied: state.history.length, pass: passesRun, totalPasses });
 
     // Keep only states that satisfy strict capacity constraints as committable output.
     if (offset === 0) {

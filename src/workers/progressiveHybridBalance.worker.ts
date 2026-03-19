@@ -13,7 +13,11 @@ self.onmessage = (event: MessageEvent<BalancingWorkerInbound>) => {
   const { requestId, payload } = message;
 
   try {
-    const result = progressiveHybridBalance(payload.rows, payload.subjectSettingsByName, payload.config);
+    const progressCallback = (progress: import('../utils/progressiveHybridBalance').BalancingProgress) => {
+      const progressResponse: BalancingWorkerOutbound = { type: 'progress', requestId, progress };
+      self.postMessage(progressResponse);
+    };
+    const result = progressiveHybridBalance(payload.rows, payload.subjectSettingsByName, payload.config, progressCallback);
     const response: BalancingWorkerOutbound = {
       type: 'success',
       requestId,
