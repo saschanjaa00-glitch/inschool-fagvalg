@@ -1210,8 +1210,11 @@ function App() {
   }, [mergedData, selectedMergedSubject]);
 
   const subjectOptions = useMemo(() => {
-    return subjects.map((subject) => subject.subject);
-  }, [subjects]);
+    const fromStudents = subjects.map((subject) => subject.subject);
+    const fromSettings = Object.keys(subjectSettingsByName);
+    const set = new Set([...fromStudents, ...fromSettings]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
+  }, [subjects, subjectSettingsByName]);
 
   const handleWarningExport = async () => {
     const XLSX = await loadXlsx();
