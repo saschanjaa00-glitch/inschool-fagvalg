@@ -1505,8 +1505,10 @@ const generateStudentRotationCandidates = (
   return rotations;
 };
 
-const tryStudentRotationImprove = (state: InternalState, config: BalancingConfig, offset: number): boolean => {
-  const bestRotation = generateStudentRotationCandidates(state, config, offset)[0];
+const tryStudentRotationImprove = (state: InternalState, config: BalancingConfig, offset: number, tracker?: ProgressTracker): boolean => {
+  const rotations = generateStudentRotationCandidates(state, config, offset);
+  tracker?.tick(rotations.length);
+  const bestRotation = rotations[0];
   if (!bestRotation) {
     return false;
   }
@@ -1613,9 +1615,10 @@ const repairOvercapacity = (
   return appliedCount;
 };
 
-const trySingleMoveImprove = (state: InternalState, config: BalancingConfig, offset: number): boolean => {
+const trySingleMoveImprove = (state: InternalState, config: BalancingConfig, offset: number, tracker?: ProgressTracker): boolean => {
   const candidates = generateAllCandidateMoves(state, config, offset)
     .filter((candidate) => candidate.estimatedScoreDelta < -config.epsilon);
+  tracker?.tick(candidates.length);
   if (candidates.length === 0) {
     return false;
   }
@@ -1694,6 +1697,7 @@ export const tryLookaheadChain = (
       }
     } else {
       for (const second of secondLevel.slice(0, config.maxDepth2Chains)) {
+        tracker?.tick();
         const secondDelta = estimateMoveDelta(snapshot, second, config, 'lookahead-chain', offset);
         if (!Number.isFinite(secondDelta)) {
           continue;
@@ -1747,9 +1751,9 @@ export const localSearchImprove = (
 
   let improved = true;
   while (improved) {
-    improved = trySingleMoveImprove(state, config, offset);
+    improved = trySingleMoveImprove(state, config, offset, tracker);
     if (!improved && ENABLE_CROSS_BLOCK_ROTATIONS) {
-      improved = tryStudentRotationImprove(state, config, offset);
+      improved = tryStudentRotationImprove(state, config, offset, tracker);
     }
     if (!improved) {
       break;

@@ -572,18 +572,9 @@ export const BalanseringView = ({
                 </span>
                 <span className={styles.overlayStatLabel}>Tid</span>
               </div>
-              <div className={styles.overlayStat}>
-                <span className={styles.overlayStatValue}>{balancingProgress?.swapsAttempted ?? 0}</span>
-                <span className={styles.overlayStatLabel}>Forsøk</span>
-              </div>
-              {(balancingProgress?.totalPasses ?? 0) > 0 && (
-                <div className={styles.overlayStat}>
-                  <span className={styles.overlayStatValue}>
-                    {balancingProgress!.pass} / {balancingProgress!.totalPasses}
-                  </span>
-                  <span className={styles.overlayStatLabel}>Runder</span>
-                </div>
-              )}
+            </div>
+            <div className={styles.overlaySubStat}>
+              <span>{balancingProgress?.swapsAttempted ?? 0} forsøk</span>
             </div>
             {balancingProgress?.phase && (
               <p className={styles.overlayPhase}>{balancingProgress.phase}</p>

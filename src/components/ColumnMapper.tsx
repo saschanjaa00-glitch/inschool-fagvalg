@@ -14,19 +14,13 @@ const STANDARD_FIELDS_BASE = [
   'navn',
   'klasse',
   'blokkmatvg2',
-  'matematikk2p',
-  'matematikks1',
-  'matematikkr1',
   'fremmedsprak',
   'reserve',
 ];
 const FIELD_LABELS: Record<string, string> = {
   navn: 'Navn',
   klasse: 'Klasse',
-  blokkmatvg2: 'Mattevalg-kolonne (R1/S1/2P)',
-  matematikk2p: 'Matematikk 2P',
-  matematikks1: 'Matematikk S1',
-  matematikkr1: 'Matematikk R1',
+  blokkmatvg2: 'Mattevalg (R1/S1/2P)',
   fremmedsprak: 'Fremmedspråk',
   reserve: 'Reserve',
   blokk1: 'Blokk 1',
@@ -108,38 +102,47 @@ export const ColumnMapper = ({
       </div>
       <p>Kolonner har blitt automatisk oppdaget. Du kan justere tilordningene om nødvendig:</p>
       
-      {files.map((file) => {
+      {[...files].sort((a, b) => a.filename.localeCompare(b.filename, 'nb', { numeric: true })).map((file) => {
         const fileMapping = currentMappings.get(file.id) || {};
         const reverseMapping = getReverseMapping(fileMapping);
         
-        const hasCombinedMathColumn = !!reverseMapping.blokkmatvg2;
-        const fieldsForFile = STANDARD_FIELDS.filter((field) => {
-          if (!hasCombinedMathColumn) {
-            return true;
-          }
+        const fieldsForFile = STANDARD_FIELDS;
 
-          return field !== 'matematikk2p' && field !== 'matematikks1' && field !== 'matematikkr1';
-        });
+        const fieldGroups: Array<{ label: string; fields: string[] }> = [
+          { label: 'Elev', fields: fieldsForFile.filter((f) => f === 'navn' || f === 'klasse') },
+          { label: 'Blokker', fields: fieldsForFile.filter((f) => f.startsWith('blokk') && f !== 'blokkmatvg2') },
+          { label: 'Matematikk', fields: fieldsForFile.filter((f) => f === 'blokkmatvg2') },
+          { label: 'Annet', fields: fieldsForFile.filter((f) => f === 'fremmedsprak' || f === 'reserve') },
+        ].filter((g) => g.fields.length > 0);
+
+        const renderField = (field: string) => (
+          <div key={field} className={styles.mappingRow}>
+            <label>{FIELD_LABELS[field]}</label>
+            <select
+              value={reverseMapping[field] || ''}
+              onChange={(e) => handleMappingChange(file.id, field, e.target.value || null)}
+              className={styles.select}
+            >
+              <option value="">-- Ikke tilordnet --</option>
+              {file.columns.map((col, index) => (
+                <option key={`${col}-${index}`} value={col}>
+                  {col}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
 
         return (
           <div key={file.id} className={styles.fileSection}>
             <h3>{file.filename}</h3>
-            <div className={styles.mappingGrid}>
-              {fieldsForFile.map((field) => (
-                <div key={field} className={styles.mappingRow}>
-                  <label>{FIELD_LABELS[field]}</label>
-                  <select
-                    value={reverseMapping[field] || ''}
-                    onChange={(e) => handleMappingChange(file.id, field, e.target.value || null)}
-                    className={styles.select}
-                  >
-                    <option value="">-- Ikke tilordnet --</option>
-                    {file.columns.map((col, index) => (
-                      <option key={`${col}-${index}`} value={col}>
-                        {col}
-                      </option>
-                    ))}
-                  </select>
+            <div className={styles.groupsRow}>
+              {fieldGroups.map((group) => (
+                <div key={group.label} className={styles.fieldGroup}>
+                  <span className={styles.fieldGroupLabel}>{group.label}</span>
+                  <div className={styles.mappingGrid}>
+                    {group.fields.map(renderField)}
+                  </div>
                 </div>
               ))}
             </div>

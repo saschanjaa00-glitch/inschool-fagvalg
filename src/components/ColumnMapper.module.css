@@ -68,33 +68,60 @@
   font-weight: 600;
 }
 
-.mappingGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 6px;
-}
-
-.mappingRow {
+.groupsRow {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+}
+
+.fieldGroupLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mappingGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+.mappingRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .mappingRow label {
   color: #222;
   font-weight: 500;
-  font-size: 12px;
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .select {
-  padding: 6px 8px;
-  border-radius: 4px;
+  padding: 2px 4px;
+  border-radius: 3px;
   border: 1px solid #ddd;
   background: #ffffff;
-  font-size: 12px;
+  font-size: 11px;
   color: #222;
   cursor: pointer;
   transition: all 0.2s ease;
+  max-width: 140px;
 }
 
 .select:hover {

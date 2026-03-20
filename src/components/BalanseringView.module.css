@@ -66,6 +66,14 @@
   margin-top: 1px;
 }
 
+.overlaySubStat {
+  text-align: center;
+  font-size: 11px;
+  color: #7a94ab;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
 .overlayPhase {
   margin: 4px 0 0;
   color: #4b6079;
