@@ -228,14 +228,6 @@ export const FagoversiktView = ({
         <div>
           <h3 className={styles.title}>Fagoversikt</h3>
           <p className={styles.subtitle}>Fag sortert alfabetisk med blokker og elevliste per fag.</p>
-          <label className={styles.mathToggle}>
-            <input
-              type="checkbox"
-              checked={showMath}
-              onChange={(e) => setShowMath(e.target.checked)}
-            />
-            Vis matematikk
-          </label>
         </div>
         <div className={styles.summaryBadge}>{displayRows.length} fag</div>
       </div>

@@ -1023,14 +1023,6 @@ export const SubjectTally = ({
   return (
     <div className={styles.wrapper}>
       <div className={styles.toolbar}>
-        <label className={styles.mathToggleLabel}>
-          <input
-            type="checkbox"
-            checked={showMath}
-            onChange={(e) => setShowMath(e.target.checked)}
-          />
-          Vis matematikk
-        </label>
         <button
           className={styles.settingsBtn}
           onClick={openOverfillModal}
