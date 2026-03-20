@@ -266,7 +266,7 @@ export const DEFAULT_BALANCING_CONFIG: BalancingConfig = {
   maxRelaxation: 10,
   maxFlowIterationsPerOffset: 250,
   maxLookaheadAttempts: 150,
-  maxDepth2Chains: 60,
+  maxDepth2Chains: 250,
   classBlockRestrictions: DEFAULT_CLASS_BLOCK_RESTRICTIONS,
   excludedSubjects: [],
   lockedAssignmentKeys: [],
