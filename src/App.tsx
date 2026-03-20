@@ -933,6 +933,69 @@ function App() {
     setStudentAssignmentChanges((prev) => [...prev, ...result.changes]);
   };
 
+  const handleAddSubject = (subjectName: string) => {
+    const key = subjectName.trim().toLocaleLowerCase('nb');
+    const alreadyExists = Object.keys(subjectSettingsByName).some(
+      (name) => name.trim().toLocaleLowerCase('nb') === key
+    );
+    if (alreadyExists) return;
+
+    captureUndoSnapshot();
+    setSubjectSettingsByName((prev) => ({
+      ...prev,
+      [subjectName.trim()]: { defaultMax: 30 },
+    }));
+    setGroupMoveLog((prev) => [...prev, {
+      subject: subjectName.trim(),
+      groupLabel: '',
+      fromBlokk: 0,
+      toBlokk: 0,
+      changedAt: new Date().toISOString(),
+      action: 'subject-added',
+    }]);
+  };
+
+  const handleRemoveSubject = (subjectName: string) => {
+    // Remove from all students
+    const allStudentIds = mergedData.map((student, index) =>
+      student.studentId || `${student.navn || 'ukjent'}:${student.klasse || 'ukjent'}:${index}`
+    );
+    const result = removeSubjectAssignmentsForStudents(
+      mergedData,
+      subjectName,
+      allStudentIds,
+      `Fag fjernet: ${subjectName}`
+    );
+
+    captureUndoSnapshot();
+
+    if (result.changes.length > 0) {
+      setMergedData(result.updatedData);
+      setSubjects(tallySubjects(result.updatedData));
+      setStudentAssignmentChanges((prev) => [...prev, ...result.changes]);
+    }
+
+    // Remove from subject settings
+    setSubjectSettingsByName((prev) => {
+      const next = { ...prev };
+      const keyLower = subjectName.trim().toLocaleLowerCase('nb');
+      for (const name of Object.keys(next)) {
+        if (name.trim().toLocaleLowerCase('nb') === keyLower) {
+          delete next[name];
+        }
+      }
+      return next;
+    });
+    setGroupMoveLog((prev) => [...prev, {
+      subject: subjectName.trim(),
+      groupLabel: '',
+      fromBlokk: 0,
+      toBlokk: 0,
+      changedAt: new Date().toISOString(),
+      action: 'subject-removed',
+    }]);
+  };
+
   const getWarningStudentId = (student: StandardField, indexHint?: number): string => {
     if (student.studentId && student.studentId.trim().length > 0) {
       return student.studentId;
@@ -1768,6 +1831,8 @@ function App() {
                   onGroupMoved={handleGroupMoved}
                   onRemoveStudentsFromSubject={handleRemoveStudentsFromSubject}
                   onOpenStudentCard={handleOpenStudentInElever}
+                  onAddSubject={handleAddSubject}
+                  onRemoveSubject={handleRemoveSubject}
                 />
               ) : activeDataTab === 'groups' ? (
                 <GrupperView

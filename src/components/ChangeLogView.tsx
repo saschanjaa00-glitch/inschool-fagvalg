@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StandardField, StudentAssignmentChange, GroupMoveLogEntry } from '../utils/excelUtils';
 import { loadXlsx } from '../utils/excelUtils';
 import {
@@ -270,6 +270,20 @@ export const ChangeLogView = ({
   const [studentStatusExpanded, setStudentStatusExpanded] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoundId, setSelectedRoundId] = useState<'final' | number>('final');
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!exportDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+        setExportDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [exportDropdownOpen]);
 
   const balancingRoundOptions = useMemo(() => {
     const byRoundId = new Map<number, string>();
@@ -577,7 +591,10 @@ export const ChangeLogView = ({
     }
 
     // Summary mode: compute net change per subject+groupLabel
-    const netByKey = new Map<string, { subject: string; groupLabel: string; fromBlokk: number; toBlokk: number; lastChangedAt: string }>();
+    const netByKey = new Map<string, { subject: string; groupLabel: string; fromBlokk: number; toBlokk: number; lastChangedAt: string; action?: GroupMoveLogEntry['action'] }>();
+
+    // Subject-add/remove entries pass through directly in summary mode
+    const subjectActionEntries: GroupMoveLogEntry[] = [];
 
     // Process in chronological order for correct net computation
     const chronological = [...relevant].sort((a, b) =>
@@ -585,6 +602,10 @@ export const ChangeLogView = ({
     );
 
     chronological.forEach((entry) => {
+      if (entry.action === 'subject-added' || entry.action === 'subject-removed') {
+        subjectActionEntries.push(entry);
+        return;
+      }
       const key = `${entry.subject.trim().toLocaleLowerCase('nb')}::${entry.groupLabel.trim().toLocaleLowerCase('nb')}`;
       const existing = netByKey.get(key);
       if (!existing) {
@@ -601,7 +622,7 @@ export const ChangeLogView = ({
       }
     });
 
-    return Array.from(netByKey.values())
+    const moveEntries = Array.from(netByKey.values())
       .filter((entry) => entry.fromBlokk !== entry.toBlokk)
       .sort((a, b) => a.subject.localeCompare(b.subject, 'nb', { sensitivity: 'base' }))
       .map((entry) => ({
@@ -611,6 +632,11 @@ export const ChangeLogView = ({
         toBlokk: entry.toBlokk,
         changedAt: entry.lastChangedAt,
       } as GroupMoveLogEntry));
+
+    return [
+      ...subjectActionEntries.sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()),
+      ...moveEntries,
+    ];
   }, [groupMoveLog, mode, searchQuery]);
 
   const excludedSubjectsSet = useMemo(() => {
@@ -969,13 +995,21 @@ export const ChangeLogView = ({
 
       const groupMoveRows = filteredGroupMoves
         .map((entry) => {
+          if (entry.action === 'subject-added') {
+            const style = getWordLineStyle('added');
+            return `<tr><td style="${style}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.subject)}</strong>: Fag lagt til</td><td style="${style}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
+          }
+          if (entry.action === 'subject-removed') {
+            const style = getWordLineStyle('removed');
+            return `<tr><td style="${style}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.subject)}</strong>: Fag fjernet</td><td style="${style}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
+          }
           const style = getWordLineStyle('moved');
           return `<tr><td style="${style}padding:5px 8px;border-radius:6px 0 0 6px;"><strong>${escapeHtml(entry.subject)}</strong> (${escapeHtml(entry.groupLabel)}): Blokk ${entry.fromBlokk} \u2192 Blokk ${entry.toBlokk}</td><td style="${style}padding:5px 8px;border-radius:0 6px 6px 0;text-align:right;white-space:nowrap;width:120px;color:#687c98;font-size:8.5pt;">${escapeHtml(formatTimestamp(entry.changedAt))}</td></tr>`;
         })
         .join('');
 
       const groupMoveSection = groupMoveRows.length > 0
-        ? `<section><h2>Gruppeflyttinger</h2><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${groupMoveRows}</table></section>`
+        ? `<section><h2>Gruppeendringer</h2><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:0 5px;">${groupMoveRows}</table></section>`
         : '';
 
       const title = mode === 'detailed' ? 'Logg (detaljert)' : 'Logg (oppsummert)';
@@ -1067,30 +1101,23 @@ export const ChangeLogView = ({
               Detaljert logg
             </button>
           </div>
+          <div className={styles.topBarDivider} />
           <div className={styles.modeToggle}>
             <button
               type="button"
               className={`${styles.modeBtn} ${sortBy === 'name' ? styles.modeBtnActive : ''}`.trim()}
               onClick={() => setSortBy('name')}
             >
-              Sortér: Navn
+              Sorter: Navn
             </button>
             <button
               type="button"
               className={`${styles.modeBtn} ${sortBy === 'programomrade' ? styles.modeBtnActive : ''}`.trim()}
               onClick={() => setSortBy('programomrade')}
             >
-              Sortér: Programområde
+              Sorter: Programområde
             </button>
           </div>
-          <input
-            type="search"
-            className={styles.searchInput}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Søk elevnavn eller fag"
-            aria-label="Sok i logg"
-          />
         </div>
         <div className={styles.topBarActions}>
           <div className={styles.roundPickerWrap}>
@@ -1117,13 +1144,36 @@ export const ChangeLogView = ({
               </span>
             )}
           </div>
-          <button type="button" className={styles.exportBtn} onClick={handleExportToExcel}>
-            Eksporter til Excel
-          </button>
-          <button type="button" className={styles.exportBtn} onClick={handleExportToWord}>
-            Eksporter til Word
-          </button>
+          <div className={styles.exportDropdownWrap} ref={exportDropdownRef}>
+            <button
+              type="button"
+              className={styles.exportBtn}
+              onClick={() => setExportDropdownOpen((prev) => !prev)}
+            >
+              Eksporter ▾
+            </button>
+            {exportDropdownOpen && (
+              <div className={styles.exportDropdownMenu}>
+                <button type="button" className={styles.exportDropdownItem} onClick={() => { setExportDropdownOpen(false); handleExportToExcel(); }}>
+                  Eksporter til Excel
+                </button>
+                <button type="button" className={styles.exportDropdownItem} onClick={() => { setExportDropdownOpen(false); handleExportToWord(); }}>
+                  Eksporter til Word
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+      </div>
+      <div className={styles.searchRow}>
+        <input
+          type="search"
+          className={styles.searchInput}
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Søk elevnavn eller fag"
+          aria-label="Sok i logg"
+        />
       </div>
 
       <div className={isRoundPreviewMode ? styles.previewOutline : ''}>
@@ -1137,23 +1187,47 @@ export const ChangeLogView = ({
           >
             <span>{groupMovesExpanded ? '▼' : '▶'}</span>
             <span className={styles.groupMovePanelTitle}>
-              Gruppeflyttinger ({filteredGroupMoves.length})
+              Gruppeendringer ({filteredGroupMoves.length})
             </span>
           </button>
 
           {groupMovesExpanded && (
             <ul className={styles.statusList}>
-              {filteredGroupMoves.map((entry, index) => (
-                <li
-                  key={`gm-${entry.subject}-${entry.groupLabel}-${entry.changedAt}-${index}`}
-                  className={`${styles.changeItem} ${styles.changeItemGroupMove}`.trim()}
-                >
-                  <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
-                  <span>
-                    <strong>{entry.subject}</strong> ({entry.groupLabel}): {formatBlokk(entry.fromBlokk)} → {formatBlokk(entry.toBlokk)}
-                  </span>
-                </li>
-              ))}
+              {filteredGroupMoves.map((entry, index) => {
+                if (entry.action === 'subject-added') {
+                  return (
+                    <li
+                      key={`gm-sa-${entry.subject}-${entry.changedAt}-${index}`}
+                      className={`${styles.changeItem} ${styles.changeItemAdded}`.trim()}
+                    >
+                      <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                      <span><strong>{entry.subject}</strong>: Fag lagt til</span>
+                    </li>
+                  );
+                }
+                if (entry.action === 'subject-removed') {
+                  return (
+                    <li
+                      key={`gm-sr-${entry.subject}-${entry.changedAt}-${index}`}
+                      className={`${styles.changeItem} ${styles.changeItemRemoved}`.trim()}
+                    >
+                      <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                      <span><strong>{entry.subject}</strong>: Fag fjernet</span>
+                    </li>
+                  );
+                }
+                return (
+                  <li
+                    key={`gm-${entry.subject}-${entry.groupLabel}-${entry.changedAt}-${index}`}
+                    className={`${styles.changeItem} ${styles.changeItemGroupMove}`.trim()}
+                  >
+                    <span className={styles.changeTime}>{formatTimestamp(entry.changedAt)}</span>
+                    <span>
+                      <strong>{entry.subject}</strong> ({entry.groupLabel}): {formatBlokk(entry.fromBlokk)} → {formatBlokk(entry.toBlokk)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

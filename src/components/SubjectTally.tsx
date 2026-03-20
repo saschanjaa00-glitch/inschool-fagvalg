@@ -37,6 +37,8 @@ interface SubjectTallyProps {
   onRemoveStudentsFromSubject: (subject: string, studentIds: string[], reason: string) => void;
   onGroupMoved: (entry: GroupMoveLogEntry) => void;
   onOpenStudentCard: (studentId: string) => void;
+  onAddSubject?: (subjectName: string) => void;
+  onRemoveSubject?: (subjectName: string) => void;
 }
 
 interface ForeignLanguageOptionCount {
@@ -180,6 +182,8 @@ export const SubjectTally = ({
   onRemoveStudentsFromSubject,
   onGroupMoved,
   onOpenStudentCard,
+  onAddSubject,
+  onRemoveSubject,
 }: SubjectTallyProps) => {
   const [showOverfillModal, setShowOverfillModal] = useState(false);
   const [massUpdateMax, setMassUpdateMax] = useState(String(DEFAULT_MAX_PER_SUBJECT));
@@ -194,6 +198,9 @@ export const SubjectTally = ({
   const [expandedMathOption, setExpandedMathOption] = useState<string | null>(null);
   const [expandedForeignOption, setExpandedForeignOption] = useState<string | null>(null);
   const [showMath, setShowMath] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [showAddSubjectPopup, setShowAddSubjectPopup] = useState(false);
+  const [pendingRemoveSubject, setPendingRemoveSubject] = useState<{ subject: string; studentCount: number } | null>(null);
 
   const activeBlokklabels = useMemo(
     () => Array.from({ length: Math.max(1, Math.min(8, blokkCount)) }, (_, i) => `Blokk ${i + 1}` as BlokkLabel),
@@ -969,17 +976,26 @@ export const SubjectTally = ({
   };
 
   const subjectRows = useMemo(() => {
-    return subjects.map((item) => {
+    const existingKeys = new Set(subjects.map((item) => item.subject.trim().toLocaleLowerCase('nb')));
+
+    // Subjects from student data
+    const fromData = subjects.map((item) => {
       const breakdown = getBlokkBreakdown(item.subject);
       const resolved = getResolvedForSubject(item.subject, breakdown);
-
-      return {
-        item,
-        breakdown,
-        isMathOption: false,
-        ...resolved,
-      };
+      return { item, breakdown, isMathOption: false, ...resolved };
     });
+
+    // Subjects from settings that have no students yet
+    const fromSettings = Object.keys(subjectSettingsByName)
+      .filter((name) => !existingKeys.has(name.trim().toLocaleLowerCase('nb')))
+      .map((name) => {
+        const breakdown = getBlokkBreakdown(name);
+        const resolved = getResolvedForSubject(name, breakdown);
+        return { item: { subject: name, count: 0 }, breakdown, isMathOption: false, ...resolved };
+      });
+
+    return [...fromData, ...fromSettings]
+      .sort((a, b) => a.item.subject.localeCompare(b.item.subject, 'nb', { sensitivity: 'base' }));
   }, [subjects, mergedData, subjectSettingsByName]);
 
   const displaySubjectRows = useMemo(() => {
@@ -1000,7 +1016,7 @@ export const SubjectTally = ({
       .sort((a, b) => a.item.subject.localeCompare(b.item.subject, 'nb', { sensitivity: 'base' }));
   }, [subjectRows, showMath, subjectStatsByKey, activeBlokklabels]);
 
-  if (subjects.length === 0) {
+  if (subjects.length === 0 && Object.keys(subjectSettingsByName).length === 0) {
     return <div className={styles.empty}>Ingen fag funnet</div>;
   }
 
@@ -1036,6 +1052,15 @@ export const SubjectTally = ({
         >
           Eksporter PDF
         </button>
+        {onAddSubject && (
+          <button
+            type="button"
+            className={styles.addSubjectBtn}
+            onClick={() => { setNewSubjectName(''); setShowAddSubjectPopup(true); }}
+          >
+            + Legg til fag
+          </button>
+        )}
       </div>
       <table className={styles.table}>
         <thead>
@@ -1208,6 +1233,16 @@ export const SubjectTally = ({
                   >
                     Eksporter liste
                   </button>
+                  {onRemoveSubject && (
+                    <button
+                      type="button"
+                      className={styles.removeSubjectBtn}
+                      title={`Fjern ${row.item.subject}`}
+                      onClick={() => setPendingRemoveSubject({ subject: row.item.subject, studentCount: row.activeTotal })}
+                    >
+                      Fjern fag
+                    </button>
+                  )}
                 </td>
               </tr>
             );
@@ -1562,6 +1597,102 @@ export const SubjectTally = ({
                 }}
               >
                 {isDeleteGroupConfirmArmed ? 'Bekreft' : 'Ja'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddSubjectPopup && onAddSubject && (
+        <div className={styles.modalOverlay} onClick={() => setShowAddSubjectPopup(false)}>
+          <div className={styles.confirmModal} onClick={(event) => event.stopPropagation()}>
+            <h4>Legg til fag</h4>
+            <div className={styles.addSubjectPopupBody}>
+              <input
+                className={styles.addSubjectInput}
+                type="text"
+                value={newSubjectName}
+                onChange={(e) => setNewSubjectName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const trimmed = newSubjectName.trim();
+                    if (!trimmed) return;
+                    const key = trimmed.toLocaleLowerCase('nb');
+                    const exists = displaySubjectRows.some((r) => r.item.subject.trim().toLocaleLowerCase('nb') === key);
+                    if (exists) return;
+                    onAddSubject(trimmed);
+                    setNewSubjectName('');
+                    setShowAddSubjectPopup(false);
+                  }
+                }}
+                placeholder="Fagnavn…"
+                aria-label="Nytt fagnavn"
+                autoFocus
+              />
+            </div>
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={`${styles.modalSecondaryBtn} ${styles.confirmActionBtn}`}
+                onClick={() => setShowAddSubjectPopup(false)}
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                className={`${styles.modalPrimaryBtn} ${styles.confirmActionBtn}`}
+                disabled={!newSubjectName.trim()}
+                onClick={() => {
+                  const trimmed = newSubjectName.trim();
+                  if (!trimmed) return;
+                  const key = trimmed.toLocaleLowerCase('nb');
+                  const exists = displaySubjectRows.some((r) => r.item.subject.trim().toLocaleLowerCase('nb') === key);
+                  if (exists) return;
+                  onAddSubject(trimmed);
+                  setNewSubjectName('');
+                  setShowAddSubjectPopup(false);
+                }}
+              >
+                Legg til
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingRemoveSubject && (
+        <div className={styles.modalOverlay} onClick={() => setPendingRemoveSubject(null)}>
+          <div className={styles.confirmModal} onClick={(event) => event.stopPropagation()}>
+            <h4>Fjern fag</h4>
+            <p className={styles.confirmMessage}>
+              Er du sikker på at du vil fjerne <strong>{pendingRemoveSubject.subject}</strong>?
+              {pendingRemoveSubject.studentCount > 0 && (
+                <>
+                  <br />
+                  {pendingRemoveSubject.studentCount} elev{pendingRemoveSubject.studentCount === 1 ? '' : 'er'} vil bli fjernet fra dette faget.
+                </>
+              )}
+            </p>
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={`${styles.modalSecondaryBtn} ${styles.confirmActionBtn}`}
+                onClick={() => setPendingRemoveSubject(null)}
+              >
+                Avbryt
+              </button>
+              <button
+                type="button"
+                className={`${styles.modalPrimaryBtn} ${styles.confirmActionBtn}`}
+                style={{ background: '#fff1f1', color: '#942727', borderColor: '#d05c5c' }}
+                onClick={() => {
+                  if (onRemoveSubject) {
+                    onRemoveSubject(pendingRemoveSubject.subject);
+                  }
+                  setPendingRemoveSubject(null);
+                }}
+              >
+                Fjern fag
               </button>
             </div>
           </div>

@@ -414,6 +414,7 @@ export interface GroupMoveLogEntry {
   fromBlokk: number;
   toBlokk: number;
   changedAt: string;
+  action?: 'moved' | 'subject-added' | 'subject-removed';
 }
 
 const parseSubjects = (value: string | null): string[] => {

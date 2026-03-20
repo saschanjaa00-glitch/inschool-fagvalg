@@ -194,8 +194,16 @@
   flex-wrap: wrap;
 }
 
+.topBarDivider {
+  width: 1px;
+  align-self: stretch;
+  background: #d0d0d0;
+  margin: 2px 4px;
+}
+
 .searchInput {
-  min-width: 220px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 6px 10px;
   border: 1px solid #d0d0d0;
   border-radius: 6px;
@@ -222,6 +230,49 @@
 
 .exportBtn:hover {
   background: #e3e8ff;
+}
+
+.exportDropdownWrap {
+  position: relative;
+}
+
+.exportDropdownMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #c3c9ff;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  min-width: 170px;
+  overflow: hidden;
+}
+
+.exportDropdownItem {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #2b3578;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.exportDropdownItem:hover {
+  background: #eef1ff;
+}
+
+.exportDropdownItem + .exportDropdownItem {
+  border-top: 1px solid #e8eaff;
+}
+
+.searchRow {
+  margin-top: 6px;
 }
 
 .modeBtn {
