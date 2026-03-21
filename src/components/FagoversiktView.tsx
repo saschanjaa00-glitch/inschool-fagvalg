@@ -89,7 +89,7 @@ export const FagoversiktView = ({
   onOpenStudentCard,
 }: FagoversiktViewProps) => {
   const [expandedSubjectKey, setExpandedSubjectKey] = useState<string | null>(null);
-  const [showMath, setShowMath] = useState(false);
+  const [showMath] = useState(false);
 
   const visibleBlokkCount = Math.min(blokkCount, 8);
 
