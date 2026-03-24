@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useForarbeid } from './ForarbeidContext';
-import styles from './ForarbeidView.module.css';
+import _styles from './ForarbeidView.module.css';
 import { findOptimalBlockAssignment } from '../utils/forarbeidOptimizer';
 import { runForarbeidParallel } from '../utils/forarbeidOptimizer.workerPool';
 
@@ -58,7 +58,7 @@ const ForarbeidView: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {subjects.map((subject, idx) => (
+          {subjects.map((subject, _idx) => (
             <tr key={subject.id}>
               <td>
                 <input

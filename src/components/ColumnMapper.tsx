@@ -41,12 +41,18 @@ export const ColumnMapper = ({
   onBlokkCountChange,
 }: ColumnMapperProps) => {
   const STANDARD_FIELDS = [...STANDARD_FIELDS_BASE, ...getBlokkFields(blokkCount)];
+  // Prefix used for blokkmatvg2 mapping keys to allow a column to be mapped
+  // to both a blokk field and blokkmatvg2 simultaneously.
+  const MATTE_PREFIX = '__mattevalg__';
+
   // Create reverse mapping: standardField -> fileColumn
   const getReverseMapping = (fileMapping: ColumnMapping): Record<string, string | null> => {
     const reverse: Record<string, string | null> = {};
     Object.entries(fileMapping).forEach(([fileColumn, standardField]) => {
       if (standardField) {
-        reverse[standardField] = fileColumn;
+        reverse[standardField] = fileColumn.startsWith(MATTE_PREFIX)
+          ? fileColumn.slice(MATTE_PREFIX.length)
+          : fileColumn;
       }
     });
     return reverse;
@@ -72,15 +78,20 @@ export const ColumnMapper = ({
     });
     
     // Update the mapping for this field
+    // First, remove this field from any column it was previously assigned to
+    Object.keys(mapping).forEach((col) => {
+      if (mapping[col] === field) {
+        mapping[col] = null;
+      }
+    });
+
     if (fileColumn) {
-      // Remove this field from any other column first
-      Object.keys(mapping).forEach((col) => {
-        if (mapping[col] === field) {
-          mapping[col] = null;
-        }
-      });
-      // Set the new mapping
-      mapping[fileColumn] = field;
+      if (field === 'blokkmatvg2') {
+        // Use synthetic key so the blokk mapping on the same column is preserved
+        mapping[MATTE_PREFIX + fileColumn] = field;
+      } else {
+        mapping[fileColumn] = field;
+      }
     }
     
     onMappingChange(fileId, mapping);

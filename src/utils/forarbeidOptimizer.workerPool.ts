@@ -24,11 +24,11 @@ export function runForarbeidParallel(
     // For now, just split by first subject's allowed blocks (for demo, not optimal)
     const allowedBlocks = Array.from({ length: blokkCount }, (_, i) => i + 1);
     const chunkSize = Math.ceil(allowedBlocks.length / WORKER_COUNT);
-    const chunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
+    const _chunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
       allowedBlocks.slice(i * chunkSize, (i + 1) * chunkSize)
     );
 
-    workers.forEach((worker, idx) => {
+    workers.forEach((worker, _idx) => {
       worker.onmessage = (event: MessageEvent) => {
         if (errorOccurred) return;
         const result: ForarbeidResult = event.data;

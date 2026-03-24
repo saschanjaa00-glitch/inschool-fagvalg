@@ -11,7 +11,7 @@ interface ForarbeidWorkerRequest {
 }
 
 self.onmessage = (event: MessageEvent<ForarbeidWorkerRequest>) => {
-  const { subjects, blokkCount, chunkStart, chunkEnd } = event.data;
+  const { subjects, blokkCount, chunkStart: _chunkStart, chunkEnd: _chunkEnd } = event.data;
   // Patch: The worker will run findOptimalBlockAssignment on a chunk of assignments.
   // For now, just run the full calculation (single-threaded fallback)
   // TODO: Implement chunking logic for true parallelism

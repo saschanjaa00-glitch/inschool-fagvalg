@@ -116,7 +116,6 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
             if (header && !addedHeaderNames.has(String(header).toLowerCase())) {
               headers.push(String(header));
               columnMapping.push(idx);
-              addedColumns.add(idx);
             }
           });
         }
@@ -269,7 +268,7 @@ export const autoDetectMapping = (
     }
     // Map combined math choice column
     else if (isBlokkMatVg2Header(col)) {
-      mapping[col] = 'blokkmatvg2';
+      mapping['__mattevalg__' + col] = 'blokkmatvg2';
     }
     // Map dedicated math columns
     else if (isMath2PHeader(col)) {
@@ -334,7 +333,7 @@ export const autoDetectMapping = (
     });
 
     if (bestColumn && bestScore > 0) {
-      mapping[bestColumn] = 'blokkmatvg2';
+      mapping['__mattevalg__' + bestColumn] = 'blokkmatvg2';
     }
   }
   
@@ -407,6 +406,17 @@ export const mergeFiles = (
             'studentId' | 'programomrade' | 'fjerdearsElev' | 'removedFromElevlist' | 'removedAssignmentsSnapshot'
           >
         ] = value;
+      });
+
+      // Also apply synthetic blokkmatvg2 mappings (__mattevalg__<col> -> blokkmatvg2)
+      Object.entries(mapping).forEach(([key, standardField]) => {
+        if (key.startsWith('__mattevalg__') && standardField === 'blokkmatvg2') {
+          const realColumn = key.slice('__mattevalg__'.length);
+          const value = row[realColumn];
+          if (value) {
+            standardRow.blokkmatvg2 = value;
+          }
+        }
       });
       
       // Progress class to next year
