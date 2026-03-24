@@ -830,7 +830,13 @@ export const computeScore = (
 
     const peak = Math.max(...sizes);
     const wSubject = 1 + weights.alpha * peak;
-    imbalanceRaw += wSubject * computeSubjectImbalanceRaw(sizes);
+
+    // Amplify imbalance 5× when any group of this subject is over capacity
+    const groups = state.groupsBySubject.get(subjectCode) || [];
+    const hasOvercap = groups.some((g) => g.size > g.capacity);
+    const overcapMultiplier = hasOvercap ? 5 : 1;
+
+    imbalanceRaw += overcapMultiplier * wSubject * computeSubjectImbalanceRaw(sizes);
     peakRaw += weights.beta * peak * peak;
   });
 
@@ -933,7 +939,14 @@ const moveIsFeasible = (
     // Offset>0 temporarily lowers usable capacity. Offset=0 is the real group max.
     const effectiveCapacity = getEffectiveCapacity(targetGroup.capacity, offset);
     if (targetGroup.size + 1 > effectiveCapacity) {
-      return false;
+      // Allow moves between two overfilled groups of the same subject
+      // if the source is strictly larger — this evens out the overcap distribution.
+      const sourceGroup = Array.from(state.groups.values()).find((group) => group.groupId === move.fromGroupId);
+      if (sourceGroup && sourceGroup.size > targetGroup.size + 1) {
+        // Source is at least 2 bigger: moving 1 student still leaves source >= target, net improvement
+      } else {
+        return false;
+      }
     }
   }
 

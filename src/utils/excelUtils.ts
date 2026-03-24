@@ -40,29 +40,48 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
           ? rawProgramomrade.replace(/^\S+\s+/, '').trim() || rawProgramomrade
           : undefined;
         
-        if (allRows.length < 6) {
-          reject(new Error('Excel file must have at least 6 rows (headers in rows 4-5, data starts from row 6)'));
+        if (allRows.length < 4) {
+          reject(new Error('Excel-filen har for fa rader til a inneholde header og data.'));
           return;
         }
         
-        // Row 4 (index 3) contains Blokk headers
-        const blockHeaders = allRows[3] || [];
-        // Row 5 (index 4) contains Navn and Klasse headers
-        const mainHeaders = allRows[4] || [];
+        // Auto-detect the main header row by scanning for "Elevnavn" / "Klasse".
+        // Typically row 5 (index 4), but some files have an extra category row pushing it to row 6 (index 5).
+        let mainHeaderRowIdx = 4; // default
+        for (let r = 2; r < Math.min(allRows.length, 10); r++) {
+          const row = allRows[r];
+          if (!row) continue;
+          const hasElevnavn = row.some((cell) => cell && String(cell).toLowerCase().includes('elevnavn'));
+          const hasKlasse = row.some((cell) => cell && String(cell).toLowerCase().includes('klasse'));
+          if (hasElevnavn || hasKlasse) {
+            mainHeaderRowIdx = r;
+            break;
+          }
+        }
+
+        // The row directly above the main header row contains Blokk / Reserve headers
+        const blockHeaderRowIdx = mainHeaderRowIdx - 1;
+
+        const blockHeaders = blockHeaderRowIdx >= 0 ? (allRows[blockHeaderRowIdx] || []) : [];
+        const mainHeaders = allRows[mainHeaderRowIdx] || [];
+        
+        // Data starts from the row after the main header row
+        const dataStartIdx = mainHeaderRowIdx + 1;
         
         // Combine headers: look for Navn, Klasse first, then Blokk columns
         const headers: string[] = [];
         const columnMapping: (number | null)[] = []; // Map to original column index
         
-        // First pass: include all row-5 headers so users can remap in Oppsett.
+        // First pass: include all main-header-row headers so users can remap in Oppsett.
+        // Skip numeric-only labels like "#1" which are sub-headers, not useful column names.
         mainHeaders.forEach((header, idx) => {
-          if (header) {
+          if (header && !/^#\d+$/.test(String(header).trim())) {
             headers.push(header);
             columnMapping.push(idx);
           }
         });
         
-        // Second pass: get Blokk columns
+        // Second pass: get Blokk columns from the row above
         blockHeaders.forEach((header, idx) => {
           if (header && header.toLowerCase().includes('blokk')) {
             headers.push(header);
@@ -78,17 +97,33 @@ export const parseExcelFile = async (file: File): Promise<ParsedFile> => {
           }
         });
 
-        // Fourth pass: get foreign language columns from row-4 labels.
+        // Fourth pass: get foreign language columns from the row above.
         blockHeaders.forEach((header, idx) => {
           if (header && isForeignLanguageHeader(header)) {
             headers.push(header);
             columnMapping.push(idx);
           }
         });
+
+        // Fifth pass: if there is a category row above the block header row,
+        // include any remaining non-empty labels (e.g. "Felles", "Science", "Valg")
+        // that don't duplicate an already-included header name from the block row.
+        const categoryRowIdx = blockHeaderRowIdx - 1;
+        const addedHeaderNames = new Set(headers.map((h) => h.toLowerCase()));
+        if (categoryRowIdx >= 1) {
+          const categoryRow = allRows[categoryRowIdx] || [];
+          categoryRow.forEach((header, idx) => {
+            if (header && !addedHeaderNames.has(String(header).toLowerCase())) {
+              headers.push(String(header));
+              columnMapping.push(idx);
+              addedColumns.add(idx);
+            }
+          });
+        }
         
-        // Data starts from row 6 (index 5)
+        // Data starts from the row after the main header row
         const jsonData: Record<string, string>[] = [];
-        for (let i = 5; i < allRows.length; i++) {
+        for (let i = dataStartIdx; i < allRows.length; i++) {
           const row = allRows[i];
           if (!row || row.every((cell) => !cell)) {
             // Skip empty rows

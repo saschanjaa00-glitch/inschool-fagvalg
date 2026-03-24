@@ -128,11 +128,12 @@ const inferClassLevels = (row: StandardField): string[] => {
   return [];
 };
 
-type BalancePresetMode = 'even' | 'underMax' | 'advanced';
+type BalancePresetMode = 'even' | 'fast' | 'advanced';
 
 const EVEN_PRESET_MAX_RELAXATION = 20;
-const UNDER_MAX_PRESET_MAX_RELAXATION = 6;
+const FAST_PRESET_MAX_RELAXATION = 20;
 const EVEN_BALANCE_OFFSETS: number[] = [20, 15, 10, 8, 6, 4, 2, 0];
+const FAST_BALANCE_OFFSETS: number[] = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 
 export const BalanseringView = ({
   mergedData,
@@ -357,11 +358,14 @@ export const BalanseringView = ({
     const effectiveMaxRelaxation =
       presetMode === 'even'
         ? EVEN_PRESET_MAX_RELAXATION
-        : presetMode === 'underMax'
-          ? UNDER_MAX_PRESET_MAX_RELAXATION
+        : presetMode === 'fast'
+          ? FAST_PRESET_MAX_RELAXATION
           : parsedMaxRelaxation;
 
-    const capacityOffsets = presetMode === 'even' ? EVEN_BALANCE_OFFSETS : undefined;
+    const capacityOffsets =
+      presetMode === 'even' ? EVEN_BALANCE_OFFSETS
+      : presetMode === 'fast' ? FAST_BALANCE_OFFSETS
+      : undefined;
 
     const selectedStudentIds = new Set(excludedStudentIds);
     const lockKeys = new Set<string>();
@@ -542,12 +546,14 @@ export const BalanseringView = ({
 
     if (mode === 'even') {
       setMaxRelaxation(String(EVEN_PRESET_MAX_RELAXATION));
+      setMaxDepth2Attempts(String(DEFAULT_BALANCING_CONFIG.maxDepth2Attempts));
       setParametersExpanded(false);
       return;
     }
 
-    if (mode === 'underMax') {
-      setMaxRelaxation(String(UNDER_MAX_PRESET_MAX_RELAXATION));
+    if (mode === 'fast') {
+      setMaxRelaxation(String(FAST_PRESET_MAX_RELAXATION));
+      setMaxDepth2Attempts('0');
       setParametersExpanded(false);
       return;
     }
@@ -598,8 +604,8 @@ export const BalanseringView = ({
         <p className={styles.description}>
           Blokk-kollisjoner repareres forst, for appen balanserer gruppene. Logg per elev finner du pa Logg
           etterpa, denne kan brukes for a gjore endringene i InSchool. Forst, sjekk lassebegreninger, sett opp hvilke
-          blokker hvert trinn skal kunne bruke. Velg sa type balansering. Få antall under maks tar minst tid, men kan gi mer
-          skjevfordelte grupper enn Balanser mest mulig jevnt. Er det fag som ikke skal balanseres, kan disse utelukkes
+          blokker hvert trinn skal kunne bruke. Velg sa type balansering. Rask balansering hopper over dype lookaheads
+          og bruker færre runder, men kan gi litt dårligere resultat. Er det fag som ikke skal balanseres, kan disse utelukkes
           fra balansering.
         </p>
 
@@ -734,11 +740,11 @@ export const BalanseringView = ({
           </button>
           <button
             type="button"
-            className={`${styles.presetBtn} ${presetMode === 'underMax' ? styles.presetBtnActive : ''}`.trim()}
-            onClick={() => selectPreset('underMax')}
+            className={`${styles.presetBtn} ${presetMode === 'fast' ? styles.presetBtnActive : ''}`.trim()}
+            onClick={() => selectPreset('fast')}
             disabled={!hasAnyAllowedRestriction}
           >
-            Få antall under maks
+            Rask balansering
           </button>
           <button
             type="button"
