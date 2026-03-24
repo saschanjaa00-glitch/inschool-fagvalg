@@ -98,6 +98,11 @@
   gap: 3px 8px;
 }
 
+.mappingGridBreak {
+  flex-basis: 100%;
+  height: 0;
+}
+
 .mappingRow {
   display: flex;
   align-items: center;

@@ -629,7 +629,7 @@ export const tallySubjects = (mergedData: StandardField[]): SubjectCount[] => {
   const subjectMap = new Map<string, number>();
   
   mergedData.forEach((row) => {
-    [row.blokk1, row.blokk2, row.blokk3, row.blokk4].forEach((blokk) => {
+    [row.blokk1, row.blokk2, row.blokk3, row.blokk4, row.blokk5, row.blokk6, row.blokk7, row.blokk8].forEach((blokk) => {
       if (blokk) {
         // Split by comma or semicolon if multiple subjects
         const subjects = blokk.split(/[,;]/).map((s) => s.trim()).filter((s) => s);

@@ -141,7 +141,9 @@ export const ColumnMapper = ({
                 <div key={group.label} className={styles.fieldGroup}>
                   <span className={styles.fieldGroupLabel}>{group.label}</span>
                   <div className={styles.mappingGrid}>
-                    {group.fields.map(renderField)}
+                    {group.fields.map((field, idx) => (
+                      <>{idx === 4 && <div className={styles.mappingGridBreak} />}{renderField(field)}</>
+                    ))}
                   </div>
                 </div>
               ))}
