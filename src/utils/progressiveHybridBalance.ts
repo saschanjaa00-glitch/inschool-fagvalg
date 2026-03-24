@@ -145,6 +145,14 @@ export interface BalanceDiagnostics {
   lookaheadRollback: number;
   unresolvedCollisions: string[];
   passesRun: number;
+  timingMs?: {
+    total: number;
+    collisionRepair: number;
+    overcapacityRepair: number;
+    flowNetwork: number;
+    localSearch: number;
+    finalCollisionRepair: number;
+  };
 }
 
 export interface ClassBlockRestrictions {
@@ -170,6 +178,7 @@ export interface BalancingConfig {
   capacityOffsets?: number[];
   maxFlowIterationsPerOffset: number;
   maxLookaheadAttempts: number;
+  maxDepth2Attempts: number;
   maxDepth2Chains: number;
   classBlockRestrictions: ClassBlockRestrictions;
   excludedSubjects: string[];
@@ -265,8 +274,9 @@ export const DEFAULT_BALANCING_CONFIG: BalancingConfig = {
   epsilon: 0.0001,
   maxRelaxation: 10,
   maxFlowIterationsPerOffset: 250,
-  maxLookaheadAttempts: 150,
-  maxDepth2Chains: 250,
+  maxLookaheadAttempts: 600,
+  maxDepth2Attempts: 100,
+  maxDepth2Chains: 200,
   classBlockRestrictions: DEFAULT_CLASS_BLOCK_RESTRICTIONS,
   excludedSubjects: [],
   lockedAssignmentKeys: [],
@@ -1768,9 +1778,8 @@ export const localSearchImprove = (
     return { lookaheadAttempts, lookaheadSuccess, lookaheadRollback };
   }
 
-  const remainingAttempts = Math.max(0, config.maxLookaheadAttempts - lookaheadAttempts);
-  if (remainingAttempts > 0) {
-    const depth2 = tryLookaheadChain(state, config, 2, remainingAttempts, offset, tracker);
+  if (config.maxDepth2Attempts > 0) {
+    const depth2 = tryLookaheadChain(state, config, 2, config.maxDepth2Attempts, offset, tracker);
     lookaheadAttempts += depth2.attempts;
     lookaheadRollback += depth2.rollbacks;
     if (depth2.success) {
@@ -2202,13 +2211,19 @@ export const progressiveHybridBalance = (
 
   // Phase 0: Resolve block-collisions first, ignoring group capacity.
   // Only subjects that truly cannot be placed in separate blocks will remain as warnings.
+  const tTotal = performance.now();
+  const tCollision0 = performance.now();
   repairCollisions(state, mergedConfig);
+  let tCollisionMs = performance.now() - tCollision0;
   let bestStrictState: InternalState | null = null;
 
   let passesRun = 0;
   let lookaheadAttempts = 0;
   let lookaheadSuccess = 0;
   let lookaheadRollback = 0;
+  let tOvercapMs = 0;
+  let tFlowMs = 0;
+  let tLocalMs = 0;
 
   const tracker = new ProgressTracker(() => state.history.length, onProgress);
 
@@ -2222,17 +2237,21 @@ export const progressiveHybridBalance = (
     passesRun += 1;
     tracker.pass = passesRun;
     tracker.report(`Balanserer runde ${passesRun} / ${totalPasses} (kapasitetsavstand ${offset})...`);
+    const tOC = performance.now();
     repairOvercapacity(state, mergedConfig, offset, tracker);
+    tOvercapMs += performance.now() - tOC;
     let improving = true;
     let flowIterations = 0;
 
     while (improving && flowIterations < mergedConfig.maxFlowIterationsPerOffset) {
       flowIterations += 1;
 
+      const tF = performance.now();
       const flow = buildFlowNetwork(state, mergedConfig, offset);
       const solved = solveFlow(flow);
       const extracted = extractMovesFromFlow(solved);
       const { applied, skipped } = applyMoves(state, extracted, mergedConfig, offset);
+      tFlowMs += performance.now() - tF;
       tracker.tick(applied.length + skipped.length);
 
       if (applied.length === 0) {
@@ -2241,7 +2260,9 @@ export const progressiveHybridBalance = (
       }
     }
 
+    const tL = performance.now();
     const local = localSearchImprove(state, mergedConfig, offset, tracker);
+    tLocalMs += performance.now() - tL;
     lookaheadAttempts += local.lookaheadAttempts;
     lookaheadSuccess += local.lookaheadSuccess;
     lookaheadRollback += local.lookaheadRollback;
@@ -2257,7 +2278,9 @@ export const progressiveHybridBalance = (
   // If a custom capacity schedule somehow omitted offset 0, keep the best computed state.
   state = cloneState(bestStrictState || state);
 
+  const tCollisionFinal = performance.now();
   const collisionRepair = repairCollisions(state, mergedConfig);
+  const tCollisionFinalMs = performance.now() - tCollisionFinal;
   const afterScore = computeScore(state, mergedConfig.weights, state.history, excludedSubjects);
   const subjectMetricsAfter = collectSubjectMetrics(state, excludedSubjects);
 
@@ -2282,6 +2305,14 @@ export const progressiveHybridBalance = (
     lookaheadRollback,
     unresolvedCollisions: collisionRepair.unresolved,
     passesRun,
+    timingMs: {
+      total: performance.now() - tTotal,
+      collisionRepair: tCollisionMs,
+      overcapacityRepair: tOvercapMs,
+      flowNetwork: tFlowMs,
+      localSearch: tLocalMs,
+      finalCollisionRepair: tCollisionFinalMs,
+    },
   };
 
   return {

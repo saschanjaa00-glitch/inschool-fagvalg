@@ -41,8 +41,9 @@ const SETTING_DESCRIPTIONS = {
   beta: 'Øker hvor hardt de største gruppene teller i topptrykk-beregningen.',
   maxRelaxation: 'Starter balanseringen så mange plasser under virkelig maks før den gradvis nærmer seg faktisk maks.',
   maxFlowIterationsPerOffset: 'Maks antall flyt-iterasjoner som kjores per kapasitetsniva (deterministisk stoppkriterium).',
-  maxLookaheadAttempts: 'Hvor mange lookahead-forsøk motoren kan bruke for å finne kjeder av flytt.',
-  maxDepth2Chains: 'Maks antall dypere to-stegs kjeder som prøves i lookahead.',
+  maxLookaheadAttempts: 'Hvor mange depth-1 lookahead-forsøk (enkelt-flytt kjeder) motoren prøver per runde.',
+  maxDepth2Attempts: 'Hvor mange depth-2 forsøk (to-stegs kjeder) motoren prøver. Dyrere enn depth-1.',
+  maxDepth2Chains: 'Maks antall kandidater som testes i hvert depth-2 forsøk.',
   restrictions: 'Klassebegrensninger styrer hvilke blokker hvert trinn har lov til å bruke.',
   excludedSubjects: 'Utelukkede fag blir ikke flyttet og teller ikke i balanseringskostnader, men de opptar fortsatt blokker og vises ellers i appen.',
   excludedStudents: 'Valgte klasser eller elever blir laast og kan ikke flyttes av balanseringen.',
@@ -151,6 +152,7 @@ export const BalanseringView = ({
     String(DEFAULT_BALANCING_CONFIG.maxFlowIterationsPerOffset)
   );
   const [maxLookaheadAttempts, setMaxLookaheadAttempts] = useState(String(DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts));
+  const [maxDepth2Attempts, setMaxDepth2Attempts] = useState(String(DEFAULT_BALANCING_CONFIG.maxDepth2Attempts));
   const [maxDepth2Chains, setMaxDepth2Chains] = useState(String(DEFAULT_BALANCING_CONFIG.maxDepth2Chains));
   const [presetMode, setPresetMode] = useState<BalancePresetMode>('even');
   const [parametersExpanded, setParametersExpanded] = useState(false);
@@ -407,6 +409,7 @@ export const BalanseringView = ({
         0,
         Math.floor(parseInputNumber(maxLookaheadAttempts, DEFAULT_BALANCING_CONFIG.maxLookaheadAttempts))
       ),
+      maxDepth2Attempts: Math.max(0, Math.floor(parseInputNumber(maxDepth2Attempts, DEFAULT_BALANCING_CONFIG.maxDepth2Attempts))),
       maxDepth2Chains: Math.max(0, Math.floor(parseInputNumber(maxDepth2Chains, DEFAULT_BALANCING_CONFIG.maxDepth2Chains))),
       classBlockRestrictions: effectiveRestrictions,
       excludedSubjects,
@@ -878,12 +881,21 @@ export const BalanseringView = ({
                 />
               </label>
               <label>
-                Lookahead-forsok
+                Lookahead depth-1
                 <input
                   type="number"
                   value={maxLookaheadAttempts}
                   title={SETTING_DESCRIPTIONS.maxLookaheadAttempts}
                   onChange={(event) => setMaxLookaheadAttempts(event.target.value)}
+                />
+              </label>
+              <label>
+                Depth-2 forsok
+                <input
+                  type="number"
+                  value={maxDepth2Attempts}
+                  title={SETTING_DESCRIPTIONS.maxDepth2Attempts}
+                  onChange={(event) => setMaxDepth2Attempts(event.target.value)}
                 />
               </label>
               <label>
@@ -1062,6 +1074,16 @@ export const BalanseringView = ({
               <div>Repeterte flytt: {lastResult.diagnostics.repeatedMoveCount}</div>
               <div>Uloselige kollisjoner: {lastResult.diagnostics.unresolvedCollisions.length}</div>
             </div>
+            {lastResult.diagnostics.timingMs && (
+              <div className={styles.runStatusGrid} style={{ marginTop: '0.5rem', opacity: 0.8, fontSize: '0.85em' }}>
+                <div>Total: {(lastResult.diagnostics.timingMs.total / 1000).toFixed(1)}s</div>
+                <div>Kollisjon: {(lastResult.diagnostics.timingMs.collisionRepair / 1000).toFixed(2)}s</div>
+                <div>Overkapasitet: {(lastResult.diagnostics.timingMs.overcapacityRepair / 1000).toFixed(2)}s</div>
+                <div>Flow-nettverk: {(lastResult.diagnostics.timingMs.flowNetwork / 1000).toFixed(2)}s</div>
+                <div>Lokalt sok: {(lastResult.diagnostics.timingMs.localSearch / 1000).toFixed(2)}s</div>
+                <div>Sluttkollisjon: {(lastResult.diagnostics.timingMs.finalCollisionRepair / 1000).toFixed(2)}s</div>
+              </div>
+            )}
           </div>
         )}
       </section>

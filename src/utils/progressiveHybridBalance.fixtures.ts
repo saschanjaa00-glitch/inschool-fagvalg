@@ -191,6 +191,7 @@ const chainRequiredCase: FixtureCase = {
 
     return progressiveHybridBalance(rows, settings, {
       maxLookaheadAttempts: 100,
+      maxDepth2Attempts: 30,
       maxDepth2Chains: 40,
       classBlockRestrictions: {
         ...DEFAULT_CLASS_BLOCK_RESTRICTIONS,

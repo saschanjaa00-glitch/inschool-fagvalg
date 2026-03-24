@@ -544,6 +544,7 @@ export const SimulateView = ({
       lockedAssignmentKeys: excludedStudentIds.map((id) => `lock:${id}`),
       blockCount: blokkCount,
       maxLookaheadAttempts: 30,
+      maxDepth2Attempts: 10,
       maxDepth2Chains: 50,
       capacityOffsets: [10, 2, 0],
     };

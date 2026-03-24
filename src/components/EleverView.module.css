@@ -403,6 +403,41 @@
   color: #7b7359;
 }
 
+.warningPresetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  flex-basis: 100%;
+}
+
+.warningPresetButton {
+  padding: 2px 6px;
+  border: 1px solid #e0d9c3;
+  background: #faf7ef;
+  color: #8a7f60;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  outline: none;
+}
+
+.warningPresetButton:focus {
+  outline: none;
+}
+
+.warningPresetButton:hover {
+  background: #f1ead3;
+  color: #6b6245;
+}
+
+.warningPresetButtonActive {
+  background: #e2d9b8;
+  color: #4a4430;
+  border-color: #c9bc8f;
+  font-weight: 600;
+}
+
 .addBar {
   display: flex;
   justify-content: flex-start;

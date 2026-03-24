@@ -1767,6 +1767,33 @@ export const EleverView = ({
                           >
                             Ignorer
                           </button>
+                          <div className={styles.warningPresetRow}>
+                            {['Bytter skole', 'Fireårselev', 'Forsert matematikk', 'Fremmedspråk programfag', 'IB', 'Sluttet', 'Sluttet toppidrett - har topp fra vg1'].map((preset) => {
+                              const current = (warningIgnoreDraftByType[warning.type] || '').trim();
+                              const parts = current.split(/,\s*/).filter(Boolean);
+                              const isActive = parts.some((p) => p === preset);
+                              return (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  className={`${styles.warningPresetButton}${isActive ? ` ${styles.warningPresetButtonActive}` : ''}`}
+                                  onClick={() => {
+                                    setWarningIgnoreDraftByType((prev) => {
+                                      const curr = (prev[warning.type] || '').trim();
+                                      const items = curr.split(/,\s*/).filter(Boolean);
+                                      const active = items.some((p) => p === preset);
+                                      const next = active
+                                        ? items.filter((p) => p !== preset).join(', ')
+                                        : [...items, preset].join(', ');
+                                      return { ...prev, [warning.type]: next };
+                                    });
+                                  }}
+                                >
+                                  {preset}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
