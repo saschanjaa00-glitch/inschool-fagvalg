@@ -22,13 +22,10 @@ export function runForarbeidParallel(
     }
 
     // For now, just split by first subject's allowed blocks (for demo, not optimal)
-    const allowedBlocks = Array.from({ length: blokkCount }, (_, i) => i + 1);
-    const chunkSize = Math.ceil(allowedBlocks.length / WORKER_COUNT);
-    const _chunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
-      allowedBlocks.slice(i * chunkSize, (i + 1) * chunkSize)
-    );
+    // TODO: Implement chunking logic for true parallelism
+    void blokkCount;
 
-    workers.forEach((worker, _idx) => {
+    workers.forEach((worker) => {
       worker.onmessage = (event: MessageEvent) => {
         if (errorOccurred) return;
         const result: ForarbeidResult = event.data;
