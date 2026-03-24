@@ -3,6 +3,7 @@ import type { StandardField } from '../utils/excelUtils';
 import {
   BLOKK_LABELS,
   getSettingsForSubject,
+  makeBlokkBreakdown,
   type BlokkLabel,
   type SubjectSettingsByName,
 } from '../utils/subjectGroups';
@@ -136,16 +137,12 @@ export const FagoversiktView = ({
     return Array.from(subjects.entries())
       .map(([subjectKey, value]) => {
 
-        const breakdown: Record<BlokkLabel, number> = {
-          'Blokk 1': 0,
-          'Blokk 2': 0,
-          'Blokk 3': 0,
-          'Blokk 4': 0,
-        };
+        const activeLabels = BLOKK_LABELS.slice(0, visibleBlokkCount);
+        const breakdown: Record<BlokkLabel, number> = makeBlokkBreakdown(visibleBlokkCount);
 
         value.blokkNumbers.forEach((blokkNumber) => {
           const label = `Blokk ${blokkNumber}` as BlokkLabel;
-          if (BLOKK_LABELS.includes(label)) {
+          if (activeLabels.includes(label)) {
             breakdown[label] = 1;
           }
         });

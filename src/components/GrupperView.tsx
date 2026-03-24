@@ -7,6 +7,8 @@ import {
   getBlokkNumber,
   getResolvedGroupsByTarget,
   getSettingsForSubject,
+  makeBlokkBreakdown,
+  makeBlokkStudentIds,
   makeGroup,
   shouldShowGroup,
   type BlokkLabel,
@@ -222,7 +224,7 @@ export const GrupperView = ({
   onStudentDataUpdate,
   onOpenStudentCard,
 }: GrupperViewProps) => {
-  const visibleBlokkCount = Math.min(blokkCount, 4);
+  const visibleBlokkCount = Math.min(blokkCount, 8);
   const [sortKey, setSortKey] = useState<SortKey>('blokk');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
@@ -310,19 +312,9 @@ export const GrupperView = ({
     const rows: GroupRow[] = [];
 
     subjectsInData.forEach((subject) => {
-        const breakdown: Record<BlokkLabel, number> = {
-          'Blokk 1': 0,
-          'Blokk 2': 0,
-          'Blokk 3': 0,
-          'Blokk 4': 0,
-        };
+        const breakdown: Record<BlokkLabel, number> = makeBlokkBreakdown(visibleBlokkCount);
 
-        const studentIdsByBlokk: StudentIdsByBlokk = {
-          'Blokk 1': [],
-          'Blokk 2': [],
-          'Blokk 3': [],
-          'Blokk 4': [],
-        };
+        const studentIdsByBlokk: StudentIdsByBlokk = makeBlokkStudentIds(visibleBlokkCount);
 
         data.forEach((student, index) => {
           const studentId = getStudentId(student, index);

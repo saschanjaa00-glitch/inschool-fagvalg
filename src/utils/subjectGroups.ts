@@ -31,7 +31,13 @@ export interface ResolvedGroup extends SubjectGroup {
 export type StudentIdsByBlokk = Record<string, string[]>;
 
 export const DEFAULT_MAX_PER_SUBJECT = 30;
-export const BLOKK_LABELS: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4'];
+export const BLOKK_LABELS: BlokkLabel[] = ['Blokk 1', 'Blokk 2', 'Blokk 3', 'Blokk 4', 'Blokk 5', 'Blokk 6', 'Blokk 7', 'Blokk 8'];
+
+export const makeBlokkBreakdown = (count: number): Record<BlokkLabel, number> =>
+  Object.fromEntries(BLOKK_LABELS.slice(0, count).map((label) => [label, 0])) as Record<BlokkLabel, number>;
+
+export const makeBlokkStudentIds = (count: number): Record<BlokkLabel, string[]> =>
+  Object.fromEntries(BLOKK_LABELS.slice(0, count).map((label) => [label, []])) as Record<BlokkLabel, string[]>;
 
 const buildDefaultSettings = (): SubjectSettings => ({
   defaultMax: DEFAULT_MAX_PER_SUBJECT,

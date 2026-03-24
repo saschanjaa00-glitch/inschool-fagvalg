@@ -277,7 +277,7 @@ export const SimulateView = ({
   const workersRef = useRef<Worker[]>([]);
 
   const activeBlokklabels = useMemo(
-    () => BLOKK_LABELS.slice(0, Math.min(blokkCount, 4)),
+    () => BLOKK_LABELS.slice(0, blokkCount),
     [blokkCount]
   );
 

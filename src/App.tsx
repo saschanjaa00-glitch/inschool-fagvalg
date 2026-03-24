@@ -1863,6 +1863,7 @@ function App() {
                   currentStudents={mergedData}
                   subjectSettingsByName={subjectSettingsByName}
                   excludedSubjects={balancingExcludedSubjects}
+                  blokkCount={blokkCount}
                   onOpenStudentCard={handleOpenStudentInElever}
                 />
               ) : activeDataTab === 'balancing' ? (

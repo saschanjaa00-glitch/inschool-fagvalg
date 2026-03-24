@@ -6,6 +6,8 @@ import {
   getBlokkNumber,
   getResolvedGroupsByTarget,
   getSettingsForSubject,
+  makeBlokkBreakdown,
+  makeBlokkStudentIds,
   type BlokkLabel,
   type SubjectSettingsByName,
 } from '../utils/subjectGroups';
@@ -17,6 +19,7 @@ interface ChangeLogViewProps {
   currentStudents: StandardField[];
   subjectSettingsByName: SubjectSettingsByName;
   excludedSubjects: string[];
+  blokkCount?: number;
   onOpenStudentCard?: (studentId: string) => void;
 }
 
@@ -261,6 +264,7 @@ export const ChangeLogView = ({
   currentStudents,
   subjectSettingsByName,
   excludedSubjects,
+  blokkCount = 4,
   onOpenStudentCard,
 }: ChangeLogViewProps) => {
   const [mode, setMode] = useState<LogMode>('summary');
@@ -669,22 +673,12 @@ export const ChangeLogView = ({
     });
 
     Array.from(subjectsInData).forEach((subject) => {
-      const breakdown: Record<BlokkLabel, number> = {
-        'Blokk 1': 0,
-        'Blokk 2': 0,
-        'Blokk 3': 0,
-        'Blokk 4': 0,
-      };
-      const studentIdsByBlokk: Record<BlokkLabel, string[]> = {
-        'Blokk 1': [],
-        'Blokk 2': [],
-        'Blokk 3': [],
-        'Blokk 4': [],
-      };
+      const breakdown: Record<BlokkLabel, number> = makeBlokkBreakdown(blokkCount);
+      const studentIdsByBlokk: Record<BlokkLabel, string[]> = makeBlokkStudentIds(blokkCount);
 
       currentStudents.forEach((student, index) => {
         const studentId = getStudentId(student, index);
-        BLOKK_LABELS.forEach((blokkLabel) => {
+        BLOKK_LABELS.slice(0, blokkCount).forEach((blokkLabel) => {
           const blokkNumber = getBlokkNumber(blokkLabel);
           const subjectsInBlokk = parseSubjects(student[getBlokkKey(blokkNumber)] as string | null | undefined);
           if (subjectsInBlokk.some((value) => isSameSubject(value, subject))) {

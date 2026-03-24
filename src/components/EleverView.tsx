@@ -40,7 +40,7 @@ interface PendingStudentAssignment {
   blokkNumber: number;
 }
 
-type BlokkLabel = 'Blokk 1' | 'Blokk 2' | 'Blokk 3' | 'Blokk 4';
+type BlokkLabel = string;
 
 interface SubjectGroupSetting {
   id: string;
@@ -138,17 +138,17 @@ const extractAssignments = (student: StandardField, blokkCount: number): Assignm
 };
 
 const hasMissingSubjects = (student: StandardField, blokkCount: number): boolean => {
-  const assignments = extractAssignments(student, blokkCount).filter((entry) => entry.blokkNumber <= 4);
+  const assignments = extractAssignments(student, blokkCount);
   return assignments.length < 3;
 };
 
 const hasTooManySubjects = (student: StandardField, blokkCount: number): boolean => {
-  const assignments = extractAssignments(student, blokkCount).filter((entry) => entry.blokkNumber <= 4);
+  const assignments = extractAssignments(student, blokkCount);
   return assignments.length >= 4;
 };
 
 const hasBlokkCollisions = (student: StandardField, blokkCount: number): boolean => {
-  const assignments = extractAssignments(student, blokkCount).filter((entry) => entry.blokkNumber <= 4);
+  const assignments = extractAssignments(student, blokkCount);
   const byBlokk = new Map<number, number>();
 
   assignments.forEach((entry) => {
