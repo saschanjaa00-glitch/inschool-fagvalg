@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import type { StandardField, StudentAssignmentChange } from '../utils/excelUtils';
 import type { SubjectSettingsByName } from './SubjectTally';
 import styles from './EleverView.module.css';
 
-type StudentFilter = 'all' | 'missing' | 'overloaded' | 'collisions' | 'duplicates' | 'new' | 'removed' | 'fourthYear';
+type StudentFilter = 'all' | 'missing' | 'overloaded' | 'collisions' | 'duplicates' | 'new' | 'removed' | 'fourthYear' | 'ignored';
 type WarningType = 'missing' | 'overloaded';
 
 interface WarningIgnoreEntry {
@@ -261,6 +262,8 @@ export const EleverView = ({
   const [newStudentBlokkToAdd, setNewStudentBlokkToAdd] = useState('');
   const [newStudentAssignments, setNewStudentAssignments] = useState<PendingStudentAssignment[]>([]);
   const [newStudentModalStatus, setNewStudentModalStatus] = useState('');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const sortedSubjectOptions = useMemo(() => {
     return subjectOptions.slice().sort((a, b) => a.localeCompare(b, 'nb', { sensitivity: 'base' }));
@@ -340,6 +343,7 @@ export const EleverView = ({
       newStudents: studentSummaries.filter((entry) => isManualStudentId(entry.studentId)).length,
       removedStudents: studentSummaries.filter((entry) => entry.removedFromElevlist).length,
       fourthYearStudents: studentSummaries.filter((entry) => !!entry.student.fjerdearsElev).length,
+      ignoredStudents: studentSummaries.filter((entry) => entry.missingIgnored || entry.overloadedIgnored).length,
     };
   }, [studentSummaries]);
 
@@ -372,6 +376,10 @@ export const EleverView = ({
 
       if (activeFilter === 'fourthYear') {
         return !!entry.student.fjerdearsElev;
+      }
+
+      if (activeFilter === 'ignored') {
+        return entry.missingIgnored || entry.overloadedIgnored;
       }
 
       return true;
@@ -954,6 +962,72 @@ export const EleverView = ({
       setStatusMessage('');
     }, 2500);
   };
+
+  const getFilteredLines = useCallback(() => {
+    return effectiveFilteredStudents.map((entry) => ({
+      name: (entry.student.navn || '').trim(),
+      klasse: (entry.student.klasse || '').trim(),
+    }));
+  }, [effectiveFilteredStudents]);
+
+  const handleCopyFilteredList = () => {
+    const lines = getFilteredLines();
+    if (lines.length === 0) {
+      applyStatusMessage('Ingen elever å kopiere');
+      return;
+    }
+    const text = lines.map((l) => (l.klasse ? `${l.name}\t${l.klasse}` : l.name)).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      applyStatusMessage(`Kopiert ${lines.length} elev${lines.length === 1 ? '' : 'er'} til utklippstavlen`);
+    }).catch(() => {
+      applyStatusMessage('Kunne ikke kopiere til utklippstavlen');
+    });
+    setShowExportMenu(false);
+  };
+
+  const handleSaveFilteredTxt = () => {
+    const lines = getFilteredLines();
+    if (lines.length === 0) {
+      applyStatusMessage('Ingen elever å lagre');
+      return;
+    }
+    const text = lines.map((l) => (l.klasse ? `${l.name}\t${l.klasse}` : l.name)).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'filtrerte-elever.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    applyStatusMessage(`Lagret ${lines.length} elev${lines.length === 1 ? '' : 'er'} som TXT`);
+    setShowExportMenu(false);
+  };
+
+  const handleSaveFilteredExcel = () => {
+    const lines = getFilteredLines();
+    if (lines.length === 0) {
+      applyStatusMessage('Ingen elever å lagre');
+      return;
+    }
+    const wsData = [['Navn', 'Klasse'], ...lines.map((l) => [l.name, l.klasse])];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Elever');
+    XLSX.writeFile(wb, 'filtrerte-elever.xlsx');
+    applyStatusMessage(`Lagret ${lines.length} elev${lines.length === 1 ? '' : 'er'} som Excel`);
+    setShowExportMenu(false);
+  };
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportMenu]);
 
   const handleSaveWarningIgnore = (type: WarningType) => {
     if (!selectedStudentEntry) {
@@ -1634,6 +1708,38 @@ export const EleverView = ({
           >
             Fjerdeårselever ({counts.fourthYearStudents})
           </button>
+          <button
+            type="button"
+            className={`${styles.filterButton} ${activeFilter === 'ignored' ? styles.filterButtonActive : ''}`.trim()}
+            onClick={() => handleSelectFilter('ignored')}
+            disabled={counts.ignoredStudents === 0}
+          >
+            Ignorert ({counts.ignoredStudents})
+          </button>
+          </div>
+          <div className={styles.exportDropdownWrapper} ref={exportMenuRef}>
+            <button
+              type="button"
+              className={styles.copyFilteredButton}
+              onClick={() => setShowExportMenu((prev) => !prev)}
+              disabled={effectiveFilteredStudents.length === 0}
+              title="Eksporter filtrerte elever"
+            >
+              Eksporter liste ({effectiveFilteredStudents.length}) ▾
+            </button>
+            {showExportMenu && (
+              <div className={styles.exportDropdownMenu}>
+                <button type="button" className={styles.exportDropdownItem} onClick={handleCopyFilteredList}>
+                  Kopier til utklippstavle
+                </button>
+                <button type="button" className={styles.exportDropdownItem} onClick={handleSaveFilteredTxt}>
+                  Lagre som TXT
+                </button>
+                <button type="button" className={styles.exportDropdownItem} onClick={handleSaveFilteredExcel}>
+                  Lagre som Excel
+                </button>
+              </div>
+            )}
           </div>
           <button type="button" className={styles.addStudentButton} onClick={openAddStudentModal}>
             Legg til elev
