@@ -963,11 +963,27 @@ export const EleverView = ({
     }, 2500);
   };
 
+  const filterLabels: Record<StudentFilter, string> = {
+    all: 'Alle elever',
+    missing: 'Mangler fag',
+    overloaded: 'For mange fag',
+    collisions: 'Blokk-kollisjoner',
+    duplicates: 'Duplikater',
+    new: 'Nye elever',
+    removed: 'Fjernet elever',
+    fourthYear: 'Fjerdeårselever',
+    ignored: 'Ignorert',
+  };
+
   const getFilteredLines = useCallback(() => {
-    return effectiveFilteredStudents.map((entry) => ({
-      name: (entry.student.navn || '').trim(),
-      klasse: (entry.student.klasse || '').trim(),
-    }));
+    return effectiveFilteredStudents.map((entry) => {
+      const name = (entry.student.navn || '').trim();
+      const klasse = (entry.student.klasse || '').trim();
+      const blokkfag = entry.assignments
+        .map((a) => `${a.subject} (Blokk ${a.blokkNumber})`)
+        .join(', ');
+      return { name, klasse, blokkfag };
+    });
   }, [effectiveFilteredStudents]);
 
   const handleCopyFilteredList = () => {
@@ -976,7 +992,10 @@ export const EleverView = ({
       applyStatusMessage('Ingen elever å kopiere');
       return;
     }
-    const text = lines.map((l) => (l.klasse ? `${l.name}\t${l.klasse}` : l.name)).join('\n');
+    const heading = filterLabels[activeFilter];
+    const header = `${heading}\nNavn\tKlasse\tBlokkfag`;
+    const rows = lines.map((l) => `${l.name}\t${l.klasse}\t${l.blokkfag}`);
+    const text = [header, ...rows].join('\n');
     navigator.clipboard.writeText(text).then(() => {
       applyStatusMessage(`Kopiert ${lines.length} elev${lines.length === 1 ? '' : 'er'} til utklippstavlen`);
     }).catch(() => {
@@ -991,7 +1010,10 @@ export const EleverView = ({
       applyStatusMessage('Ingen elever å lagre');
       return;
     }
-    const text = lines.map((l) => (l.klasse ? `${l.name}\t${l.klasse}` : l.name)).join('\n');
+    const heading = filterLabels[activeFilter];
+    const header = `${heading}\nNavn\tKlasse\tBlokkfag`;
+    const rows = lines.map((l) => `${l.name}\t${l.klasse}\t${l.blokkfag}`);
+    const text = [header, ...rows].join('\n');
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1009,7 +1031,12 @@ export const EleverView = ({
       applyStatusMessage('Ingen elever å lagre');
       return;
     }
-    const wsData = [['Navn', 'Klasse'], ...lines.map((l) => [l.name, l.klasse])];
+    const heading = filterLabels[activeFilter];
+    const wsData = [
+      [heading],
+      ['Navn', 'Klasse', 'Blokkfag'],
+      ...lines.map((l) => [l.name, l.klasse, l.blokkfag]),
+    ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Elever');
@@ -1725,7 +1752,7 @@ export const EleverView = ({
               disabled={effectiveFilteredStudents.length === 0}
               title="Eksporter filtrerte elever"
             >
-              Eksporter liste ({effectiveFilteredStudents.length}) ▾
+              Eksporter liste ▾
             </button>
             {showExportMenu && (
               <div className={styles.exportDropdownMenu}>
